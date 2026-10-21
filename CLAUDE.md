@@ -13,7 +13,18 @@ Po každé větší práci **aktualizuj sekci „Kde jsme skončili“**.
 
 ## Kde jsme skončili
 
-Stav k 21. 10. 2026, verze **1.0** (schéma databáze 1):
+Stav k 21. 10. 2026, verze **1.1** (schéma databáze 2):
+
+- 1.1: uživatel na přání „Admin bude moct vygenerovat uživatele bez hesla a heslo si nastaví
+  uživatel po prvním přihlášení“. V dialogu uživatele je volba hesla `passwordMode`: `self`
+  (výchozí u nového: `pass_hash = ''`, `pending_until` = teď + `ETD_INVITE_DAYS` = 7 dní),
+  `set` (heslo zadá správce, volitelně `must_change`) a `keep` (úprava beze změny). `self`
+  u existujícího účtu = zapomenuté heslo (staré přestane platit, relace skončí); sám sobě ho
+  správce nastavit nemůže. Přihlášení účtu bez hesla vrátí `needPassword` (bez relace), stránka
+  ukáže „Nastav si heslo“ a `first_password` heslo uloží (jen když je pořád prázdné) a přihlásí.
+  Prázdné heslo u ostatních jmen = „Vyplň heslo.“ (400, nepočítá se jako pokus). Riziko: do
+  nastavení hesla si ho může nastavit kdokoli se jménem, proto 7 dní a stav v seznamu
+  uživatelů. Aktualizace 1.0 → 1.1 ověřena na lokálním Apachi (schéma 1 → 2, data zůstala).
 
 - Zadání uživatele: přihlášení na uvítací stránce, pak výběr oddělení (Broušení WPA, Brush WPA,
   Hala, Visitor; hned potom doplnil Montáž, Elox, Studio, CNC Hala2). Visitor jen nahlíží.
@@ -78,12 +89,14 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
 - `bin/`: `setup-token.php` (kód prvního spuštění), `backup-db.php`, `reset-password.php`,
   `rebuild-parts.php`. Jen z příkazové řádky.
 - `deploy/`: `install.sh` a konfigurace Apache. `router.php`: router pro `php -S`.
-- `tests/`: `test_http.py` (server, API, nástroje), `test_scan.js`, `e2e.js` (Playwright).
+- `tests/`: `test_http.py` (server, API, nástroje, aktualizace databáze verze 1.0), `test_scan.js`,
+  `e2e.js` (Playwright).
 
 ## Datový model (SQLite, `lib/etd.php`)
 
-- `users`: login (bez diakritiky, NOCASE), jméno, `pass_hash` (password_hash), `role`
-  (`operator`/`admin`/`visitor`), `depts` (čárkami; prázdné = všechna), `active`, `must_change`.
+- `users`: login (bez diakritiky, NOCASE), jméno, `pass_hash` (password_hash; prázdný = účet
+  bez hesla), `role` (`operator`/`admin`/`visitor`), `depts` (čárkami; prázdné = všechna),
+  `active`, `must_change`, `pending_until` (schéma 2: do kdy si uživatel bez hesla heslo nastaví).
 - `sessions`: id = SHA-256 tokenu z cookie `etd_session` (HttpOnly, SameSite=Strict, cesta
   aplikace), vybrané oddělení `dept` (kód nebo `visitor`). Nečinnost 12 h, nejdéle 24 h.
   Změna hesla, role, oddělení nebo vypnutí účtu přihlášení uživatele ukončí.
@@ -105,7 +118,7 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
 ## Vývoj a testy v cloudové session
 
 ```bash
-python3 -m unittest discover -s tests     # 26 testů, asi 20 s
+python3 -m unittest discover -s tests     # 32 testů, asi 25 s
 node tests/test_scan.js
 node tests/e2e.js                         # SHOTS=/adresář uloží snímky
 php -l lib/etd.php                        # a další změněné PHP soubory

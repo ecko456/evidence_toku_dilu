@@ -16,11 +16,11 @@ $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 $action = (string)($_GET['action'] ?? '');
 etd_require_app_request($method);
 
-const ETD_POST_ACTIONS = ['setup', 'login', 'logout', 'dept', 'password', 'scan', 'cancel', 'user_save', 'apikey_create', 'apikey_revoke'];
+const ETD_POST_ACTIONS = ['setup', 'login', 'first_password', 'logout', 'dept', 'password', 'scan', 'cancel', 'user_save', 'apikey_create', 'apikey_revoke'];
 if (in_array($action, ETD_POST_ACTIONS, true) && $method !== 'POST') {
     etd_fail('Tahle akce vyžaduje POST.', 405);
 }
-if ($method === 'POST' && !in_array($action, ['setup', 'login', 'logout'], true)) {
+if ($method === 'POST' && !in_array($action, ['setup', 'login', 'first_password', 'logout'], true)) {
     etd_require_client();
 }
 
@@ -34,7 +34,7 @@ function etd_state(): array
         'actions' => ETD_ACTIONS,
         'roles' => ETD_ROLES,
         'limits' => ['batch' => ETD_MAX_BATCH, 'barcode' => ETD_MAX_BARCODE, 'position' => ETD_MAX_POSITION, 'qty' => ETD_MAX_QTY,
-            'password' => ETD_MIN_PASSWORD, 'cancelMinutes' => intdiv(ETD_CANCEL_OWN_SECONDS, 60), 'duplicateMinutes' => intdiv(ETD_DUPLICATE_SECONDS, 60)],
+            'password' => ETD_MIN_PASSWORD, 'inviteDays' => ETD_INVITE_DAYS, 'cancelMinutes' => intdiv(ETD_CANCEL_OWN_SECONDS, 60), 'duplicateMinutes' => intdiv(ETD_DUPLICATE_SECONDS, 60)],
     ];
     if ($session === null) {
         return $base + ['setup' => etd_setup_required(), 'user' => null];
@@ -102,6 +102,16 @@ switch ($action) {
         etd_throttle_login(mb_substr($login, 0, 60));
         $password = (string)($input['password'] ?? '');
         $user = etd_login_name($login) === null ? null : etd_one('SELECT * FROM users WHERE login = ?', [$login]);
+        // účet bez hesla (založil ho správce): heslo si uživatel nastaví teď (first_password)
+        if ($user !== null && $user['active'] && etd_user_pending($user)) {
+            if (!etd_invite_valid($user)) {
+                etd_fail('Čas na první přihlášení vypršel (' . ETD_INVITE_DAYS . ' dní od založení účtu). Požádej správce, ať ti ho obnoví.', 403);
+            }
+            etd_json(['needPassword' => true, 'login' => $user['login'], 'minPassword' => ETD_MIN_PASSWORD]);
+        }
+        if ($password === '') {
+            etd_fail('Vyplň heslo.', 400);
+        }
         // u neexistujícího jména se heslo zahešuje (trvá stejně dlouho), ať se jména nedají zkoušet
         $ok = $user !== null ? password_verify($password, (string)$user['pass_hash']) : (bool)password_hash($password, PASSWORD_DEFAULT) && false;
         if (!$ok || !$user['active']) {
@@ -111,6 +121,28 @@ switch ($action) {
         if (password_needs_rehash($user['pass_hash'], PASSWORD_DEFAULT)) {
             etd_exec('UPDATE users SET pass_hash = ? WHERE id = ?', [password_hash($password, PASSWORD_DEFAULT), (int)$user['id']]);
         }
+        etd_start_session((int)$user['id']);
+        etd_json(etd_state());
+
+    case 'first_password':
+        // první přihlášení účtu bez hesla: uživatel si heslo nastaví sám a rovnou se přihlásí
+        $input = etd_input();
+        $login = strtolower(trim((string)($input['login'] ?? '')));
+        etd_throttle_login(mb_substr($login, 0, 60));
+        $user = etd_login_name($login) === null ? null : etd_one('SELECT * FROM users WHERE login = ?', [$login]);
+        if ($user === null || !$user['active'] || !etd_invite_valid($user)) {
+            etd_login_failed(mb_substr($login, 0, 60));
+            etd_fail('Tenhle účet si heslo nastavit nemůže. Přihlas se svým heslem, nebo požádej správce.', 403);
+        }
+        if ($error = etd_password_error($input['password'] ?? null)) {
+            etd_fail($error);
+        }
+        $changed = etd_exec("UPDATE users SET pass_hash = ?, must_change = 0, pending_until = NULL, updated_at = ? WHERE id = ? AND pass_hash = ''",
+            [password_hash((string)$input['password'], PASSWORD_DEFAULT), time(), (int)$user['id']]);
+        if ($changed !== 1) {
+            etd_fail('Heslo k tomuhle účtu už je nastavené. Přihlas se jím.', 409);
+        }
+        etd_log((string)$user['name'], "{$user['name']} ({$user['login']}) si při prvním přihlášení nastavil(a) heslo.");
         etd_start_session((int)$user['id']);
         etd_json(etd_state());
 
@@ -288,8 +320,16 @@ switch ($action) {
         $login = etd_login_name($input['login'] ?? '');
         $role = (string)($input['role'] ?? '');
         $active = !empty($input['active']);
-        $password = $input['password'] ?? '';
+        $password = is_string($input['password'] ?? null) ? $input['password'] : '';
         $mustChange = !empty($input['mustChange']);
+        // self = heslo si nastaví sám při (příštím) přihlášení, set = heslo zadá správce, keep = beze změny
+        $mode = (string)($input['passwordMode'] ?? '');
+        if (!in_array($mode, ['self', 'set', 'keep'], true)) {
+            $mode = $password !== '' ? 'set' : ($id === 0 ? 'self' : 'keep');
+        }
+        if ($id === 0 && $mode === 'keep') {
+            $mode = 'self';
+        }
         if ($name === '') {
             etd_fail('Vyplň jméno.');
         }
@@ -305,20 +345,25 @@ switch ($action) {
             etd_fail('Vyber aspoň jedno oddělení, na kterém smí pracovat.');
         }
         $deptsText = count($depts) === count(ETD_DEPTS) ? '' : implode(',', $depts);
-        if (($id === 0 || $password !== '') && ($error = etd_password_error($password))) {
+        if ($mode === 'set' && ($error = etd_password_error($password))) {
             etd_fail($error);
         }
-        $saved = etd_tx(static function () use ($admin, $id, $name, $login, $role, $active, $password, $mustChange, $deptsText): array {
+        if ($mode === 'self' && $id === (int)$admin['id']) {
+            etd_fail('Vlastní heslo si změníš v menu (Změnit heslo).', 409);
+        }
+        $saved = etd_tx(static function () use ($admin, $id, $name, $login, $role, $active, $password, $mustChange, $deptsText, $mode): array {
             $other = etd_one('SELECT id FROM users WHERE login = ? AND id <> ?', [$login, $id]);
             if ($other !== null) {
                 etd_fail('Přihlašovací jméno už má někdo jiný.', 409);
             }
             $now = time();
             if ($id === 0) {
-                etd_exec('INSERT INTO users (login, name, pass_hash, role, depts, active, must_change, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [$login, $name, password_hash((string)$password, PASSWORD_DEFAULT), $role, $deptsText, $active ? 1 : 0, $mustChange ? 1 : 0, $now, $now]);
+                $set = $mode === 'set';
+                etd_exec('INSERT INTO users (login, name, pass_hash, role, depts, active, must_change, pending_until, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [$login, $name, $set ? password_hash($password, PASSWORD_DEFAULT) : '', $role, $deptsText, $active ? 1 : 0, $set && $mustChange ? 1 : 0,
+                        $set ? null : $now + ETD_INVITE_DAYS * 86400, $now, $now]);
                 $id = (int)etd_db()->lastInsertId();
-                etd_log((string)$admin['name'], "Nový uživatel {$name} ({$login}), role " . ETD_ROLES[$role] . '.');
+                etd_log((string)$admin['name'], "Nový uživatel {$name} ({$login}), role " . ETD_ROLES[$role] . ($set ? ', heslo zadal správce.' : ', heslo si nastaví při prvním přihlášení.'));
             } else {
                 $old = etd_one('SELECT * FROM users WHERE id = ?', [$id]);
                 if ($old === null) {
@@ -334,11 +379,14 @@ switch ($action) {
                 etd_exec('UPDATE users SET login = ?, name = ?, role = ?, depts = ?, active = ?, updated_at = ? WHERE id = ?',
                     [$login, $name, $role, $deptsText, $active ? 1 : 0, $now, $id]);
                 $changes = [];
-                if ($password !== '') {
-                    etd_exec('UPDATE users SET pass_hash = ?, must_change = ? WHERE id = ?', [password_hash((string)$password, PASSWORD_DEFAULT), $mustChange ? 1 : 0, $id]);
-                    $changes[] = 'nové heslo';
+                if ($mode === 'set') {
+                    etd_exec('UPDATE users SET pass_hash = ?, must_change = ?, pending_until = NULL WHERE id = ?', [password_hash($password, PASSWORD_DEFAULT), $mustChange ? 1 : 0, $id]);
+                    $changes[] = 'nové heslo od správce';
+                } elseif ($mode === 'self') {
+                    etd_exec("UPDATE users SET pass_hash = '', must_change = 0, pending_until = ? WHERE id = ?", [$now + ETD_INVITE_DAYS * 86400, $id]);
+                    $changes[] = 'heslo si nastaví sám při příštím přihlášení';
                 }
-                if ($password !== '' || !$active || $old['role'] !== $role || $old['depts'] !== $deptsText) {
+                if ($mode !== 'keep' || !$active || $old['role'] !== $role || $old['depts'] !== $deptsText) {
                     // změna hesla, role nebo přístupů platí hned: přihlášení uživatele skončí
                     etd_exec('DELETE FROM sessions WHERE user_id = ? AND id <> ?', [$id, (string)$admin['session_id']]);
                 }

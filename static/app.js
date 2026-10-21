@@ -225,27 +225,59 @@
       <h2>Přihlášení</h2>
       <p class="lead">Po přihlášení si vybereš oddělení, na kterém pracuješ.</p>
       ${loginNote ? `<p class="form-error">${esc(loginNote)}</p>` : ''}
+      <p class="form-note">Poprvé? Zadej přihlašovací jméno od správce, heslo nech prázdné a nastavíš si ho.</p>
       <label class="field"><span>Přihlašovací jméno</span><input type="text" name="login" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="60" required value="${esc(store.get('lastLogin', ''))}"></label>
-      <label class="field"><span>Heslo</span><input type="password" name="password" autocomplete="current-password" required></label>
+      <label class="field"><span>Heslo</span><input type="password" name="password" autocomplete="current-password"></label>
       <button class="btn primary big" type="submit">Přihlásit se</button>
-      <p class="hint mt-14">Zapomenuté heslo nastaví nové správce.</p>
+      <p class="hint mt-14">Zapomenuté heslo? Správce ti umožní nastavit si nové.</p>
     </form>`);
     const form = $('#loginForm');
     const f = form.elements;
     (f.login.value ? f.password : f.login).focus();
     form.addEventListener('submit', async e => {
       e.preventDefault();
-      if (!f.login.value.trim() || !f.password.value) return formError(form, 'Vyplň přihlašovací jméno a heslo.');
+      if (!f.login.value.trim()) return formError(form, 'Vyplň přihlašovací jméno.');
       const button = $('[type=submit]', form); button.disabled = true;
       try {
-        ST = await api('login', { login: f.login.value.trim(), password: f.password.value });
+        const res = await api('login', { login: f.login.value.trim(), password: f.password.value });
         store.set('lastLogin', f.login.value.trim().toLowerCase());
+        if (res.needPassword) { renderFirstPassword(res.login); return; }
+        ST = res;
         loginNote = ''; picking = false;
         route();
       } catch (err) {
         button.disabled = false; f.password.value = ''; f.password.focus();
         formError(form, err.message);
       }
+    });
+  }
+
+  /** První přihlášení účtu, který správce založil bez hesla: uživatel si heslo zvolí sám. */
+  function renderFirstPassword(login) {
+    welcome(`<form class="login-card" id="firstForm" novalidate>
+      <h2>Nastav si heslo</h2>
+      <p class="lead">Účet <b>${esc(login)}</b> ještě nemá heslo. Zvol si vlastní; příště se přihlásíš jménem a tímhle heslem.</p>
+      <input type="text" name="username" autocomplete="username" value="${esc(login)}" hidden>
+      <label class="field"><span>Heslo (aspoň ${ST.limits.password} znaků)</span><input type="password" name="new" autocomplete="new-password" required></label>
+      <label class="field"><span>Heslo znovu</span><input type="password" name="new2" autocomplete="new-password" required></label>
+      <button class="btn primary big" type="submit">Uložit heslo a přihlásit se</button>
+      <p class="mt-12"><button class="linkish" type="button" data-back>Zpět na přihlášení</button></p>
+    </form>`);
+    const form = $('#firstForm');
+    const f = form.elements;
+    f.new.focus();
+    $('[data-back]', form).onclick = () => { loginNote = ''; renderLogin(); };
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      if (f.new.value.length < ST.limits.password) return formError(form, `Heslo musí mít aspoň ${ST.limits.password} znaků.`);
+      if (f.new.value !== f.new2.value) return formError(form, 'Hesla se neshodují.');
+      const button = $('[type=submit]', form); button.disabled = true;
+      try {
+        ST = await api('first_password', { login, password: f.new.value });
+        loginNote = ''; picking = false;
+        toast('Heslo je nastavené. Příště se přihlásíš jménem a tímhle heslem.');
+        route();
+      } catch (err) { button.disabled = false; formError(form, err.message); }
     });
   }
 
@@ -932,7 +964,7 @@
       try {
         users = (await api('users')).users;
         $('#usersBox').innerHTML = `<div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>Jméno</th><th>Přihlášení</th><th>Role</th><th>Oddělení</th><th>Naposledy přihlášen</th><th></th></tr></thead><tbody>
-          ${users.map(u => `<tr class="${u.active ? '' : 'cancelled'}"><td data-wide><b>${esc(u.name)}</b>${u.active ? '' : ' <span class="tag">vypnutý</span>'}${u.mustChange ? ' <span class="tag warn">čeká na vlastní heslo</span>' : ''}</td>
+          ${users.map(u => `<tr class="${u.active ? '' : 'cancelled'}"><td data-wide><b>${esc(u.name)}</b>${u.active ? '' : ' <span class="tag">vypnutý</span>'}${u.pending ? (u.pendingExpired ? ' <span class="tag crit">čas na nastavení hesla vypršel</span>' : ` <span class="tag warn">heslo si nastaví při přihlášení (do ${esc(fmtDay.format(new Date(u.pendingUntil)))})</span>`) : u.mustChange ? ' <span class="tag warn">čeká na vlastní heslo</span>' : ''}</td>
             <td class="mono">${esc(u.login)}</td><td>${esc(u.roleLabel)}</td>
             <td>${u.role === 'visitor' ? '<span class="muted">jen Visitor</span>' : u.deptsAll ? 'všechna' : u.depts.map(c => deptTag(c, ST.depts.find(d => d.code === c).name)).join('<br>')}</td>
             <td class="nowrap">${u.lastLoginAt ? esc(when(u.lastLoginAt)) : '<span class="muted">nikdy</span>'}</td>
@@ -969,24 +1001,38 @@
               .map(([v, t, s]) => `<label><input type="radio" name="role" value="${v}"${u.role === v ? ' checked' : ''}><span><b>${t}</b><small>${s}</small></span></label>`).join('')}</div></div>
           <div class="field" data-depts${u.role === 'operator' ? '' : ' hidden'}><span>Oddělení, na kterých smí pracovat</span><div class="checks">
             ${ST.depts.map(d => `<label class="check"><input type="checkbox" name="dept" value="${d.code}"${u.depts.includes(d.code) ? ' checked' : ''}> ${deptDot(d.code)}${esc(d.name)}</label>`).join('')}</div></div>
-          <div class="grid-2 tight">
-            <label class="field"><span>${isNew ? 'Heslo' : 'Nové heslo'} <span class="muted">(aspoň ${ST.limits.password} znaků${isNew ? '' : ', prázdné = beze změny'})</span></span><input type="text" name="password" autocomplete="off" spellcheck="false"></label>
+          <div class="field"><span>Heslo</span><div class="choice">
+            ${isNew ? '' : `<label><input type="radio" name="pwmode" value="keep" checked><span><b>Beze změny</b><small>${u.pending ? 'heslo si zatím nenastavil' : 'uživatel dál používá svoje heslo'}</small></span></label>`}
+            ${!isNew && u.id === ST.user.id ? '' : `<label><input type="radio" name="pwmode" value="self"${isNew ? ' checked' : ''}><span><b>${isNew ? 'Nastaví si ho sám při prvním přihlášení' : 'Nastaví si nové při příštím přihlášení'}</b>
+              <small>zadá jen přihlašovací jméno a heslo si zvolí; platí ${ST.limits.inviteDays} dní${isNew ? '' : ', současné heslo přestane platit'}</small></span></label>`}
+            <label><input type="radio" name="pwmode" value="set"><span><b>${isNew ? 'Zadám ho teď' : 'Zadám nové teď'}</b><small>heslo předáš uživateli</small></span></label></div></div>
+          <div class="grid-2 tight" data-pwset hidden>
+            <label class="field"><span>Heslo <span class="muted">(aspoň ${ST.limits.password} znaků)</span></span><input type="text" name="password" autocomplete="off" spellcheck="false"></label>
             <div class="field"><span>&nbsp;</span><label class="check"><input type="checkbox" name="mustChange" checked> Po přihlášení si nastaví vlastní heslo</label></div></div>
           ${isNew ? '' : `<label class="check"><input type="checkbox" name="active"${u.active ? ' checked' : ''}> Účet je zapnutý (vypnutý se nepřihlásí)</label>`}
           ${isNew ? '' : '<p class="hint mt-10">Změna hesla, role nebo oddělení uživatele hned odhlásí.</p>'}`,
         onOpen: d => {
           $$('[name=role]', d).forEach(r => r.addEventListener('change', () => { $('[data-depts]', d).hidden = $('[name=role]:checked', d).value !== 'operator'; }));
           const pw = $('[name=password]', d);
-          if (isNew) pw.value = randomPassword();
+          $$('[name=pwmode]', d).forEach(r => r.addEventListener('change', () => {
+            const set = $('[name=pwmode]:checked', d).value === 'set';
+            $('[data-pwset]', d).hidden = !set;
+            if (set && !pw.value) pw.value = randomPassword();
+          }));
         },
         validate: async form => {
           const f = form.elements;
           const body = {
             id: isNew ? 0 : u.id, name: f.name.value, login: f.login.value.trim().toLowerCase(), role: $('[name=role]:checked', form).value,
-            depts: $$('[name=dept]:checked', form).map(x => x.value), password: f.password.value, mustChange: f.mustChange.checked, active: isNew ? true : f.active.checked,
+            depts: $$('[name=dept]:checked', form).map(x => x.value), passwordMode: $('[name=pwmode]:checked', form).value,
+            mustChange: f.mustChange.checked, active: isNew ? true : f.active.checked,
           };
-          try { await api('user_save', body); } catch (err) { return err.message; }
-          toast(isNew ? `Uživatel ${body.name} je přidaný${body.password ? `, heslo: ${body.password}` : ''}.` : 'Uloženo.', '', isNew ? 9000 : 4000);
+          body.password = body.passwordMode === 'set' ? f.password.value : '';
+          let saved;
+          try { saved = (await api('user_save', body)).user; } catch (err) { return err.message; }
+          const until = saved.pendingUntil ? fmtDay.format(new Date(saved.pendingUntil)) : '';
+          toast(body.passwordMode === 'self' ? `${isNew ? `Uživatel ${body.name} je přidaný.` : 'Uloženo.'} Při přihlášení zadá jen jméno „${saved.login}“ a heslo si nastaví (do ${until}).`
+            : body.passwordMode === 'set' ? `${isNew ? `Uživatel ${body.name} je přidaný` : 'Uloženo'}, heslo: ${body.password}` : 'Uloženo.', '', body.passwordMode === 'keep' ? 4000 : 9000);
           return null;
         },
       });

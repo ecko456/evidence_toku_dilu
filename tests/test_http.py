@@ -583,7 +583,7 @@ class DataTests(Base):
         self.admin.scan("prijem", [{"barcode": f"B-{i}"} for i in range(30)], position="A1", define=True)
         self.admin.scan("export", [{"barcode": "B-1", "qty": 2}])
         with self.server.db() as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
             parts_before = sorted(db.execute("SELECT barcode, last_id, last_action, last_dept FROM parts").fetchall())
         backups = self.server.data / "zalohy"
         out = self.server.cli("bin/backup-db.php", str(backups))
@@ -607,6 +607,219 @@ class DataTests(Base):
         finally:
             restarted.stop()
         self.server = Server(self.server.data)
+
+
+class FirstLoginTests(Base):
+    """Uživatel bez hesla: správce ho založí, heslo si uživatel nastaví při prvním přihlášení."""
+
+    def new_pending(self, login="novak"):
+        status, data = self.admin.post("user_save", {"login": login, "name": "Jan Novák", "role": "operator", "depts": ["hala"],
+                                                     "passwordMode": "self", "active": True})
+        self.assertEqual(status, 200, data)
+        return data["user"]
+
+    def test_user_without_password_sets_it_at_first_login(self):
+        info = self.new_pending()
+        self.assertTrue(info["pending"])
+        self.assertFalse(info["pendingExpired"])
+        self.assertIsNotNone(info["pendingUntil"])
+        with self.server.db() as db:
+            self.assertEqual(db.execute("SELECT pass_hash FROM users WHERE login = 'novak'").fetchone()[0], "")
+        client = Client(self.server)
+        status, data = client.post("login", {"login": "Novak", "password": ""})
+        self.assertEqual((status, data.get("needPassword"), data.get("login")), (200, True, "novak"))
+        status, _ = client.get("recent")
+        self.assertEqual(status, 401, "výzva k nastavení hesla ještě nikoho nepřihlásí")
+        status, data = client.post("login", {"login": "novak", "password": "cokoli-123"})
+        self.assertTrue(data.get("needPassword"), "účet bez hesla neotevře žádné heslo")
+        status, data = client.post("first_password", {"login": "novak", "password": "kratke"})
+        self.assertEqual(status, 400)
+        status, state = client.post("first_password", {"login": "novak", "password": "mojeheslo1"})
+        self.assertEqual(status, 200, state)
+        self.assertEqual(state["user"]["login"], "novak")
+        self.assertFalse(state["user"]["pending"])
+        self.assertTrue(client.dept("hala")["canWrite"])
+        status, data = Client(self.server).post("first_password", {"login": "novak", "password": "jineheslo1"})
+        self.assertEqual(status, 403, "nastavené heslo už nikdo jiný nepřepíše")
+        Client(self.server).login("novak", "mojeheslo1")
+        status, log = self.admin.get("adminlog")
+        self.assertTrue(any("při prvním přihlášení nastavil" in l["text"] for l in log["log"]))
+
+    def test_empty_password_and_unknown_login(self):
+        client = Client(self.server)
+        status, data = client.post("login", {"login": "spravce", "password": ""})
+        self.assertEqual((status, data["error"]), (400, "Vyplň heslo."))
+        status, data = client.post("login", {"login": "neexistuje", "password": ""})
+        self.assertEqual((status, data["error"]), (400, "Vyplň heslo."), "neexistující jméno se neprozradí")
+        status, data = client.post("first_password", {"login": "spravce", "password": "noveheslo1"})
+        self.assertEqual(status, 403, "účet s heslem si ho takhle nezmění")
+        status, data = client.post("first_password", {"login": "neexistuje", "password": "noveheslo1"})
+        self.assertEqual(status, 403)
+        Client(self.server).login("spravce")
+
+    def test_invite_expires_and_admin_renews(self):
+        info = self.new_pending()
+        with self.server.db() as db:
+            db.execute("UPDATE users SET pending_until = ? WHERE login = 'novak'", (int(time.time()) - 1,))
+        status, data = Client(self.server).post("login", {"login": "novak", "password": ""})
+        self.assertEqual(status, 403)
+        self.assertIn("vypršel", data["error"])
+        status, _ = Client(self.server).post("first_password", {"login": "novak", "password": "mojeheslo1"})
+        self.assertEqual(status, 403)
+        status, users = self.admin.get("users")
+        self.assertTrue(next(u for u in users["users"] if u["login"] == "novak")["pendingExpired"])
+        status, data = self.admin.post("user_save", {"id": info["id"], "login": "novak", "name": "Jan Novák", "role": "operator",
+                                                     "depts": ["hala"], "active": True, "passwordMode": "self"})
+        self.assertEqual(status, 200)
+        self.assertFalse(data["user"]["pendingExpired"], "správce čas obnoví")
+        status, _ = Client(self.server).post("first_password", {"login": "novak", "password": "mojeheslo1"})
+        self.assertEqual(status, 200)
+
+    def test_admin_lets_existing_user_choose_new_password(self):
+        worker, info = self.user("dvorak", depts=["hala"])
+        status, data = self.admin.post("user_save", {"id": info["id"], "login": "dvorak", "name": "Dvořák", "role": "operator",
+                                                     "depts": ["hala"], "active": True, "passwordMode": "self"})
+        self.assertEqual(status, 200)
+        self.assertTrue(data["user"]["pending"])
+        status, _ = worker.get("recent")
+        self.assertEqual(status, 401, "staré přihlášení skončí")
+        status, data = Client(self.server).post("login", {"login": "dvorak", "password": PASSWORD})
+        self.assertTrue(data.get("needPassword"), "staré heslo přestalo platit")
+        status, data = self.admin.post("user_save", {"id": info["id"], "login": "dvorak", "name": "Petr Dvořák", "role": "operator",
+                                                     "depts": ["hala"], "active": True, "passwordMode": "keep"})
+        self.assertTrue(data["user"]["pending"], "úprava jména stav hesla nemění")
+        status, users = self.admin.get("users")
+        me = next(u for u in users["users"] if u["login"] == "spravce")
+        status, _ = self.admin.post("user_save", {"id": me["id"], "login": "spravce", "name": "Jana", "role": "admin", "depts": [],
+                                                  "active": True, "passwordMode": "self"})
+        self.assertEqual(status, 409, "správce si vlastní heslo takhle nezruší")
+
+    def test_disabled_user_cannot_set_password(self):
+        info = self.new_pending()
+        self.admin.post("user_save", {"id": info["id"], "login": "novak", "name": "Jan Novák", "role": "operator", "depts": ["hala"],
+                                      "active": False, "passwordMode": "keep"})
+        status, data = Client(self.server).post("login", {"login": "novak", "password": ""})
+        self.assertNotIn("needPassword", data if isinstance(data, dict) else {})
+        status, _ = Client(self.server).post("first_password", {"login": "novak", "password": "mojeheslo1"})
+        self.assertEqual(status, 403)
+
+
+# Schéma databáze verze 1.0 (beze změny z lib/etd.php té verze): test aktualizace na verzi 1.1+.
+V1_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    login TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    name TEXT NOT NULL,
+    pass_hash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    depts TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1,
+    must_change INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    last_login_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    dept TEXT,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    ip TEXT,
+    user_agent TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+-- Záznamy se nemažou. Chybný záznam se stornuje (cancelled_at) a do posledního stavu se nepočítá.
+CREATE TABLE IF NOT EXISTS records (
+    id INTEGER PRIMARY KEY,
+    barcode TEXT NOT NULL,
+    action TEXT NOT NULL,
+    dept TEXT NOT NULL,
+    position TEXT,
+    qty INTEGER,
+    user_id INTEGER,
+    user_name TEXT NOT NULL,
+    user_login TEXT NOT NULL,
+    batch TEXT,
+    created_at INTEGER NOT NULL,
+    cancelled_at INTEGER,
+    cancelled_by TEXT,
+    cancel_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_records_barcode ON records(barcode COLLATE NOCASE, id);
+CREATE INDEX IF NOT EXISTS idx_records_dept ON records(dept, id);
+-- Poslední platný záznam každé průvodky (odvozené z records, jde kdykoli přepočítat).
+CREATE TABLE IF NOT EXISTS parts (
+    barcode TEXT PRIMARY KEY COLLATE NOCASE,
+    last_id INTEGER NOT NULL,
+    last_action TEXT NOT NULL,
+    last_dept TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_parts_state ON parts(last_dept, last_action, updated_at);
+CREATE TABLE IF NOT EXISTS api_keys (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    prefix TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,
+    created_by TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER,
+    last_ip TEXT,
+    revoked_at INTEGER,
+    revoked_by TEXT
+);
+CREATE TABLE IF NOT EXISTS attempts (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_attempts ON attempts(kind, subject, created_at);
+CREATE TABLE IF NOT EXISTS admin_log (
+    id INTEGER PRIMARY KEY,
+    at INTEGER NOT NULL,
+    by_name TEXT NOT NULL,
+    text TEXT NOT NULL
+);
+"""
+
+
+class UpgradeTests(unittest.TestCase):
+    def test_version_1_0_database_upgrades_without_data_loss(self):
+        data = Path(tempfile.mkdtemp(prefix="etd-v1-"))
+        hashed = subprocess.run([PHP, "-r", f"echo password_hash('{PASSWORD}', PASSWORD_DEFAULT);"], capture_output=True, text=True).stdout
+        key = "etd_" + "ab" * 20
+        now = int(time.time())
+        with sqlite3.connect(data / "evidence.sqlite3") as db:
+            db.executescript(V1_SCHEMA)
+            db.execute("PRAGMA user_version = 1")
+            db.execute("INSERT INTO users (login, name, pass_hash, role, depts, active, must_change, created_at, updated_at) VALUES ('spravce', 'Jana', ?, 'admin', '', 1, 0, ?, ?)", (hashed, now, now))
+            db.execute("INSERT INTO records (barcode, action, dept, position, qty, user_id, user_name, user_login, created_at) VALUES ('U-1', 'prijem', 'hala', 'A1', NULL, 1, 'Jana', 'spravce', ?)", (now - 100,))
+            db.execute("INSERT INTO records (barcode, action, dept, position, qty, user_id, user_name, user_login, created_at) VALUES ('U-1', 'export', 'hala', NULL, 12, 1, 'Jana', 'spravce', ?)", (now - 50,))
+            db.execute("INSERT INTO parts (barcode, last_id, last_action, last_dept, updated_at) VALUES ('U-1', 2, 'export', 'hala', ?)", (now - 50,))
+            db.execute("INSERT INTO api_keys (name, prefix, key_hash, created_by, created_at) VALUES ('ERP', ?, ?, 'Jana', ?)",
+                       (key[:12], __import__("hashlib").sha256(key.encode()).hexdigest(), now))
+        server = Server(data)
+        try:
+            client = Client(server)
+            state = client.login("spravce")
+            self.assertEqual(state["version"], "1.1")
+            self.assertFalse(state["user"]["pending"])
+            status, found = client.get("search", q="u-1")
+            self.assertEqual([r["action"] for r in found["exact"]["history"]], ["export", "prijem"])
+            status, last = client.request("GET", "/api/v1/last?barcode=U-1", headers={"X-Etd": None, "X-Etd-Client": None, "Authorization": "Bearer " + key})
+            self.assertEqual((status, last["record"]["quantity"]), (200, 12), "API klíč z verze 1.0 platí dál")
+            status, data_ = client.post("user_save", {"login": "novak", "name": "Novák", "role": "operator", "depts": ["hala"], "passwordMode": "self", "active": True})
+            self.assertEqual(status, 200, data_)
+            with server.db() as db:
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
+                self.assertIn("pending_until", [r[1] for r in db.execute("PRAGMA table_info(users)")])
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM records").fetchone()[0], 2)
+        finally:
+            server.stop()
+            shutil.rmtree(data, ignore_errors=True)
 
 
 if __name__ == "__main__":

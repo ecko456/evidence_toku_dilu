@@ -9,9 +9,9 @@ declare(strict_types=1);
  * Časy jsou v databázi jako unixové sekundy (UTC), ven jdou v pražském čase (ISO 8601).
  */
 
-const ETD_VERSION = '1.0';
+const ETD_VERSION = '1.1';
 /** Verze schématu databáze (PRAGMA user_version). Novou verzi doplň do etd_migrate(). */
-const ETD_SCHEMA = 1;
+const ETD_SCHEMA = 2;
 /** Zapisovat smí jen stránka aspoň téhle verze (hlavička X-Etd-Client), viz etd_require_client(). */
 const ETD_MIN_CLIENT = 1;
 const ETD_SESSION_COOKIE = 'etd_session';
@@ -25,6 +25,7 @@ const ETD_MAX_QTY = 1000000;
 const ETD_DUPLICATE_SECONDS = 600;     // stejný záznam znovu do 10 minut = nejspíš dvojí načtení
 const ETD_CANCEL_OWN_SECONDS = 1800;   // vlastní záznam jde stornovat 30 minut
 const ETD_MIN_PASSWORD = 8;
+const ETD_INVITE_DAYS = 7;            // účet bez hesla: heslo si uživatel nastaví do 7 dní
 const ETD_FAIL_WINDOW = 900;
 const ETD_FAILS_PER_IP = 30;
 const ETD_FAILS_PER_LOGIN = 8;
@@ -174,7 +175,15 @@ CREATE TABLE IF NOT EXISTS admin_log (
 );
 SQL);
         }
-        // Další verze schématu sem: if ($version < 2) { … }
+        if ($version < 2) {
+            // 1.1: účet bez hesla (pass_hash = ''), heslo si uživatel nastaví při prvním přihlášení
+            // do pending_until. Starší účty mají heslo, sloupec u nich zůstane prázdný.
+            $columns = array_column($pdo->query('PRAGMA table_info(users)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+            if (!in_array('pending_until', $columns, true)) {
+                $pdo->exec('ALTER TABLE users ADD COLUMN pending_until INTEGER');
+            }
+        }
+        // Další verze schématu sem: if ($version < 3) { … }
         $pdo->exec('PRAGMA user_version = ' . ETD_SCHEMA);
         $pdo->exec('COMMIT');
     } catch (Throwable $error) {
@@ -536,6 +545,18 @@ function etd_user_depts(array $user): array
     return $chosen ?: array_keys(ETD_DEPTS);
 }
 
+/** Účet bez hesla: heslo si uživatel nastaví sám při prvním přihlášení. */
+function etd_user_pending(array $user): bool
+{
+    return (string)$user['pass_hash'] === '';
+}
+
+/** Platí ještě možnost nastavit si heslo (ETD_INVITE_DAYS od založení nebo obnovení)? */
+function etd_invite_valid(array $user): bool
+{
+    return etd_user_pending($user) && (int)($user['pending_until'] ?? 0) >= time();
+}
+
 function etd_user_public(array $user): array
 {
     return [
@@ -548,6 +569,9 @@ function etd_user_public(array $user): array
         'deptsAll' => $user['role'] !== 'operator' || trim((string)$user['depts']) === '',
         'active' => (bool)$user['active'],
         'mustChange' => (bool)$user['must_change'],
+        'pending' => etd_user_pending($user),
+        'pendingUntil' => etd_user_pending($user) ? etd_iso((int)($user['pending_until'] ?? 0)) : null,
+        'pendingExpired' => etd_user_pending($user) && !etd_invite_valid($user),
         'createdAt' => etd_iso((int)$user['created_at']),
         'lastLoginAt' => etd_iso($user['last_login_at'] === null ? null : (int)$user['last_login_at']),
     ];

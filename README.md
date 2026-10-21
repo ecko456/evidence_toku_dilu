@@ -29,6 +29,17 @@ Role uživatele určuje správce:
 | Správce | všechna oddělení, uživatelé, API klíče, storno i starších záznamů |
 | Jen nahlížení | přihlásí se jen jako Visitor (Přehled a Na pracovištích) |
 
+**Nový uživatel** (Správa → Přidat uživatele). Výchozí volba hesla je **Nastaví si ho sám při
+prvním přihlášení**: uživatel na přihlašovací stránce zadá jen přihlašovací jméno, heslo nechá
+prázdné a hned si zvolí vlastní. Na to má 7 dní od založení; pak mu správce čas obnoví úpravou
+uživatele (stejná volba). Dokud si heslo nenastaví, může ho nastavit kdokoli, kdo zná jeho
+přihlašovací jméno. Proto účet zakládej až krátce před prvním přihlášením. Seznam uživatelů ukazuje,
+kdo si heslo ještě nenastavil. Druhá možnost je **Zadám ho teď**: aplikace navrhne dočasné heslo
+a správce ho uživateli předá.
+
+**Zapomenuté heslo.** Správa → Upravit → **Nastaví si nové při příštím přihlášení**. Staré heslo
+přestane platit a uživatel si zvolí nové stejně jako při prvním přihlášení.
+
 ## Jak se pracuje
 
 **Příjem na pracoviště.** Načti barcode průvodky; příjem se hned zapíše a ukáže se, odkud díly
