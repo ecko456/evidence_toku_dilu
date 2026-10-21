@@ -92,7 +92,7 @@ function qrVideo(file) {
     await page.waitForFunction(() => { const v = document.querySelector('dialog.cam-dlg video'); return v && v.videoWidth > 0; }, null, { timeout: 10000 });
     await shot(page, 'cam-02-fotoaparat');
     await page.waitForSelector('dialog.cam-dlg', { state: 'detached', timeout: 15000 });
-    await page.waitForFunction(() => /Přijato na pracoviště Hala/.test(document.querySelector('#scanResult').innerText), null, { timeout: 8000 });
+    await page.waitForFunction(() => /Přijato na pracoviště Hala 2/.test(document.querySelector('#scanResult').innerText), null, { timeout: 8000 });
     const first = (await page.locator('#scanResult .code').innerText()).trim();
     check(CODES.includes(first), `jeden příjem: fotoaparát přečetl QR (${first}), zavřel se a příjem se zapsal`);
     check(await page.evaluate(() => typeof window.ZXing === 'object'), 'bez BarcodeDetectoru se načetla knihovna ZXing');

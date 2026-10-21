@@ -155,6 +155,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(state["setup"])
         self.assertEqual([d["code"] for d in state["depts"]], ["brouseni_wpa", "brush_wpa", "hala", "montaz", "elox", "studio", "cnc_hala2"])
+        self.assertEqual([d["name"] for d in state["depts"]], ["Broušení WPA", "Brush WPA", "Hala 2", "Montáž", "Elox", "Studio", "CNC Hala2"])
         token = self.server.cli("bin/setup-token.php").stdout.strip()
         self.assertRegex(token, r"^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$")
         status, data = self.client.post("setup", {"token": "0000-0000-0000", "login": "spravce", "name": "J", "password": PASSWORD})

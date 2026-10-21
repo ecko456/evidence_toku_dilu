@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Časy jsou v databázi jako unixové sekundy (UTC), ven jdou v pražském čase (ISO 8601).
  */
 
-const ETD_VERSION = '1.2';
+const ETD_VERSION = '1.2.1';
 /** Verze schématu databáze (PRAGMA user_version). Novou verzi doplň do etd_migrate(). */
 const ETD_SCHEMA = 2;
 /** Zapisovat smí jen stránka aspoň téhle verze (hlavička X-Etd-Client), viz etd_require_client(). */
@@ -35,7 +35,7 @@ const ETD_TZ = 'Europe/Prague';
 const ETD_DEPTS = [
     'brouseni_wpa' => 'Broušení WPA',
     'brush_wpa' => 'Brush WPA',
-    'hala' => 'Hala',
+    'hala' => 'Hala 2',          // do 1.2 „Hala“; kód zůstal, záznamy se nepřepisují
     'montaz' => 'Montáž',
     'elox' => 'Elox',
     'studio' => 'Studio',

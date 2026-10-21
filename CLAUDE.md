@@ -13,7 +13,11 @@ Po každé větší práci **aktualizuj sekci „Kde jsme skončili“**.
 
 ## Kde jsme skončili
 
-Stav k 21. 10. 2026, verze **1.2** (schéma databáze 2):
+Stav k 21. 10. 2026, verze **1.2.1** (schéma databáze 2):
+
+- 1.2.1: oddělení 3 se jmenuje **Hala 2** („Akorát 3. se jmenuje Hala a má to být Hala 2“).
+  Změnil se jen název v `ETD_DEPTS`, kód `hala` zůstal (je v uložených záznamech a v API),
+  takže starší záznamy se ukážou jako Hala 2 a nic se nepřepisuje.
 
 - 1.2: „v mobilní verzi a tabletu přidej k barcode tlačítko pro čtečku QR kódů“. Tlačítko
   **Načíst QR** (`[data-cam]`) vedle pole v Příjmu, Exportu a Přehledu, jen když

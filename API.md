@@ -53,7 +53,7 @@ Bez přepisu cest na serveru jde i `api/v1/index.php?endpoint=last&barcode=…`.
 ```
 
 - `action`: `prijem` (Příjem na pracoviště) nebo `export` (Export z pracoviště).
-- `department`: `brouseni_wpa` (Broušení WPA), `brush_wpa` (Brush WPA), `hala` (Hala),
+- `department`: `brouseni_wpa` (Broušení WPA), `brush_wpa` (Brush WPA), `hala` (Hala 2; do verze 1.2 se jmenovala Hala, kód zůstal),
   `montaz` (Montáž), `elox` (Elox), `studio` (Studio), `cnc_hala2` (CNC Hala2).
 - `position`: pozice, kam se díly umístily (jen u příjmu, jinak `null`).
 - `quantity`: počet kusů (jen u exportu, jinak `null`).

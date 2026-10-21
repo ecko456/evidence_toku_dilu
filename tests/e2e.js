@@ -66,15 +66,15 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     await page.click('#setupForm [type=submit]');
     await page.waitForSelector('.tiles');
     check(await page.locator('.tile').count() === 8, 'výběr oddělení: 7 pracovišť a Visitor');
-    check((await page.locator('.tile b').allInnerTexts()).join('|') === 'Broušení WPA|Brush WPA|Hala|Montáž|Elox|Studio|CNC Hala2|Visitor', 'pořadí oddělení');
+    check((await page.locator('.tile b').allInnerTexts()).join('|') === 'Broušení WPA|Brush WPA|Hala 2|Montáž|Elox|Studio|CNC Hala2|Visitor', 'pořadí oddělení');
     await shot(page, '02-oddeleni');
     await page.keyboard.press('3');
     await page.waitForSelector('#scanInput');
-    check((await page.locator('.dept-pill').innerText()).includes('Hala'), 'klávesa 3 vybrala Halu');
+    check((await page.locator('.dept-pill').innerText()).includes('Hala 2'), 'klávesa 3 vybrala Halu 2');
 
     /* --- příjem jedné průvodky --- */
     await scan(page, 'PR-1001');
-    await waitResult(page, /Přijato na pracoviště Hala/);
+    await waitResult(page, /Přijato na pracoviště Hala 2/);
     check((await resultText(page)).includes('První záznam této průvodky'), 'příjem: první záznam');
     await page.waitForSelector('#recentBox .code-btn');
     check((await page.locator('#recentBox').innerText()).includes('PR-1001'), 'příjem je v posledních záznamech');
@@ -84,7 +84,7 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     await waitResult(page, /Už je zapsáno/);
     check(true, 'dvojí načtení do 10 minut se nezapíše (stejná průvodka bez ohledu na velikost písmen)');
     await page.click('[data-force]');
-    await waitResult(page, /Přijato na pracoviště Hala/);
+    await waitResult(page, /Přijato na pracoviště Hala 2/);
     check((await resultText(page)).includes('Předtím: Příjem na pracoviště'), 'Zapsat znovu zapíše a ukáže předchozí záznam');
 
     // znaky mimo pole pro barcode: čtečka píše, i když fokus utekl na tlačítko
@@ -141,7 +141,7 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     await page.waitForFunction(() => /Poslední záznam: Příjem/.test(document.querySelector('#qtyInfo').innerText));
     await shot(page, '04-export-ks');
     await page.keyboard.type('48'); await page.keyboard.press('Enter');
-    await waitResult(page, /Export z pracoviště Hala/);
+    await waitResult(page, /Export z pracoviště Hala 2/);
     check((await resultText(page)).includes('48 ks'), 'export zapsal 48 ks');
 
     await scan(page, 'PR-2002');
@@ -288,7 +288,7 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     await page.waitForSelector('#scanInput');
     await scan(page, 'PR-2001');
     await waitResult(page, /Přijato na pracoviště Montáž/);
-    check((await resultText(page)).includes('Předtím: Export z pracoviště · Hala · 48 ks'), 'příjem na Montáži ukáže, že díly přišly exportem z Haly');
+    check((await resultText(page)).includes('Předtím: Export z pracoviště · Hala 2 · 48 ks'), 'příjem na Montáži ukáže, že díly přišly exportem z Haly');
 
     /* --- Visitor jen nahlíží --- */
     await page.click('[data-menu]');

@@ -14,7 +14,7 @@ Po přihlášení si každý vybere oddělení, na kterém pracuje (klikem nebo 
 
 1. Broušení WPA
 2. Brush WPA
-3. Hala
+3. Hala 2
 4. Montáž
 5. Elox
 6. Studio
