@@ -396,6 +396,8 @@ dialog.dlg::backdrop { background: rgba(8, 18, 26, .55); }
   h1 { font-size: 1.35rem; }
   .scan-row, .search-row { flex-direction: column; }
   .scan-row .btn, .search-row .btn { width: 100%; }
+  .scan-btns { width: 100%; }
+  .scan-btns .btn { width: auto; flex: 1 1 0; }
   .scan-input { font-size: 1.3rem; min-height: 56px; }
   .tile { min-height: 96px; padding: 12px 14px; gap: 4px; }
   .tile .num { font-size: 1.3rem; }
@@ -420,6 +422,24 @@ dialog.dlg::backdrop { background: rgba(8, 18, 26, .55); }
   .tiles { gap: 10px; }
   .brand b { display: none; }
 }
+
+/* ---------- fotoaparát (telefon a tablet) ---------- */
+.scan-btns { display: flex; gap: 10px; }
+.cam-btn .ico { width: 24px; height: 24px; flex: none; }
+dialog.cam-dlg, dialog.cam-dlg:modal { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: #000; color: #fff; }
+dialog.cam-dlg::backdrop { background: #000; }
+.cam-box { position: relative; width: 100%; height: 100%; overflow: hidden; }
+.cam-box video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+.cam-frame { position: absolute; left: 50%; top: 46%; width: min(72vw, 62vh, 360px); aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 20px; border: 3px solid rgba(255, 255, 255, .92); box-shadow: 0 0 0 200vmax rgba(0, 0, 0, .45); }
+.cam-top { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: max(14px, env(safe-area-inset-top)) 16px 18px; background: linear-gradient(rgba(0, 0, 0, .65), transparent); font-size: 1.05rem; }
+.cam-x { width: 46px; height: 46px; flex: none; border-radius: 50%; border: 0; background: rgba(255, 255, 255, .2); color: #fff; font-size: 1.25rem; cursor: pointer; }
+.cam-bottom { position: absolute; bottom: 0; left: 0; right: 0; display: grid; gap: 12px; padding: 22px 16px max(20px, env(safe-area-inset-bottom)); background: linear-gradient(transparent, rgba(0, 0, 0, .8) 35%); }
+.cam-state { text-align: center; font-weight: 700; font-size: 1.05rem; min-height: 1.5em; word-break: break-word; }
+.cam-state.ok { color: #86e8b0; }
+.cam-state.warn { color: #ffd37f; }
+.cam-state.err { color: #ffa29a; }
+.cam-acts { display: flex; gap: 10px; justify-content: center; }
+.cam-acts .btn { min-width: 140px; min-height: 50px; }
 
 /* ---------- pomocné třídy (CSP nepovoluje style="…") ---------- */
 .mt-4 { margin-top: 4px; }

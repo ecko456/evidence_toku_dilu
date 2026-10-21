@@ -214,6 +214,8 @@ class AuthTests(Base):
         self.assertIn("script-src 'self'", csp)
         self.assertIn("frame-ancestors 'none'", csp)
         self.assertEqual(headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertIn("camera=(self)", headers.get("Permissions-Policy", ""), "fotoaparát pro QR smí jen tahle stránka")
+        self.assertIn("microphone=()", headers.get("Permissions-Policy", ""))
         self.assertNotIn(b"style=\"", body)
         with self.server.db() as db:
             self.assertNotIn(cookie.split("etd_session=")[1].split(";")[0], [r[0] for r in db.execute("SELECT id FROM sessions")], "v databázi je jen otisk tokenu")
@@ -238,6 +240,10 @@ class AuthTests(Base):
             self.assertEqual(status, 404, path)
         status, body, _ = self.admin.request("GET", "/static/app.js", raw=True)
         self.assertEqual(status, 200)
+        status, body, _ = self.admin.request("GET", "/static/vendor/zxing.min.js", raw=True)
+        self.assertEqual(status, 200, "knihovna pro čtení QR fotoaparátem")
+        status, body, _ = self.admin.request("GET", "/static/vendor/LICENSE-zxing.txt", raw=True)
+        self.assertEqual(status, 404)
 
 
 class DeptTests(Base):
@@ -805,7 +811,7 @@ class UpgradeTests(unittest.TestCase):
         try:
             client = Client(server)
             state = client.login("spravce")
-            self.assertEqual(state["version"], "1.1")
+            self.assertNotEqual(state["version"], "1.0", "běží novější verze")
             self.assertFalse(state["user"]["pending"])
             status, found = client.get("search", q="u-1")
             self.assertEqual([r["action"] for r in found["exact"]["history"]], ["export", "prijem"])

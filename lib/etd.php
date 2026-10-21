@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Časy jsou v databázi jako unixové sekundy (UTC), ven jdou v pražském čase (ISO 8601).
  */
 
-const ETD_VERSION = '1.1';
+const ETD_VERSION = '1.2';
 /** Verze schématu databáze (PRAGMA user_version). Novou verzi doplň do etd_migrate(). */
 const ETD_SCHEMA = 2;
 /** Zapisovat smí jen stránka aspoň téhle verze (hlavička X-Etd-Client), viz etd_require_client(). */
@@ -303,7 +303,7 @@ function etd_security_headers(): void
     header('Cross-Origin-Opener-Policy: same-origin');
     header('Cross-Origin-Resource-Policy: same-origin');
     header('X-Robots-Tag: noindex, nofollow, noarchive');
-    header('Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
+    header('Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
     header("Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
     if (etd_is_https()) {
         header('Strict-Transport-Security: max-age=31536000');

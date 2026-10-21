@@ -13,7 +13,19 @@ Po každé větší práci **aktualizuj sekci „Kde jsme skončili“**.
 
 ## Kde jsme skončili
 
-Stav k 21. 10. 2026, verze **1.1** (schéma databáze 2):
+Stav k 21. 10. 2026, verze **1.2** (schéma databáze 2):
+
+- 1.2: „v mobilní verzi a tabletu přidej k barcode tlačítko pro čtečku QR kódů“. Tlačítko
+  **Načíst QR** (`[data-cam]`) vedle pole v Příjmu, Exportu a Přehledu, jen když
+  `(any-pointer: coarse)` a `getUserMedia` v zabezpečeném kontextu (`camAvailable`). Dialog
+  `openCamera` přes celou obrazovku: zadní fotoaparát, každých 150 ms `codeDecoder` =
+  BarcodeDetector (všechny podporované formáty z `CAM_FORMATS`), jinak ZXing
+  (`static/vendor/zxing.min.js` = `@zxing/library` 0.23.0 z Odměn, Apache-2.0, bez eval, načte se
+  až při prvním otevření). Jednotlivě se po kódu zavře a kód jde do `handleCode` (stejná cesta
+  jako čtečka, bez opravy klávesnice); vícenásobně čte dál a stejný kód za otevření bere jednou.
+  Po kódu z fotoaparátu se pole nefokusuje (`viaCamera`), na telefonu by vyjela klávesnice.
+  Permissions-Policy `camera=(self)`. Se skutečným telefonem nikdo nezkoušel; ověřeno falešnou
+  kamerou v Chromiu (`tests/e2e_camera.js`, video s QR vyrobí ZXing), BarcodeDetector náhradní třídou.
 
 - 1.1: uživatel na přání „Admin bude moct vygenerovat uživatele bez hesla a heslo si nastaví
   uživatel po prvním přihlášení“. V dialogu uživatele je volba hesla `passwordMode`: `self`
@@ -90,7 +102,8 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
   `rebuild-parts.php`. Jen z příkazové řádky.
 - `deploy/`: `install.sh` a konfigurace Apache. `router.php`: router pro `php -S`.
 - `tests/`: `test_http.py` (server, API, nástroje, aktualizace databáze verze 1.0), `test_scan.js`,
-  `e2e.js` (Playwright).
+  `e2e.js` (Playwright), `e2e_camera.js` (QR fotoaparátem s falešnou kamerou).
+- `static/vendor/`: `zxing.min.js` a `LICENSE-zxing.txt` (licence se z webu nevydává, `.txt`).
 
 ## Datový model (SQLite, `lib/etd.php`)
 
@@ -121,6 +134,7 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
 python3 -m unittest discover -s tests     # 32 testů, asi 25 s
 node tests/test_scan.js
 node tests/e2e.js                         # SHOTS=/adresář uloží snímky
+node tests/e2e_camera.js                  # fotoaparát (Chromium s --use-file-for-fake-video-capture)
 php -l lib/etd.php                        # a další změněné PHP soubory
 ```
 

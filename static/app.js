@@ -159,6 +159,146 @@
     return chars.slice(0, 5).join('') + '-' + chars.slice(5).join('');
   }
 
+  /* ---------- fotoaparát: QR kód (a čárové kódy, kde to zařízení umí) ----------
+     Jen na telefonu a tabletu (dotyková obrazovka); na počítači se čte čtečkou. Kódy čte
+     BarcodeDetector, kde ho prohlížeč má (Chrome na Androidu), jinak knihovna ZXing
+     (static/vendor/zxing.min.js, načte se až při prvním otevření fotoaparátu; iPhone, iPad). */
+  const CAM_FORMATS = ['qr_code', 'code_128', 'code_39', 'code_93', 'codabar', 'ean_13', 'ean_8', 'itf', 'upc_a', 'upc_e', 'data_matrix', 'pdf417', 'aztec'];
+  const camIcon = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 3h6v2H5v4H3zm12 0h6v6h-2V5h-4zM3 15h2v4h4v2H3zm16 0h2v6h-6v-2h4z"/><path fill="currentColor" d="M7 7h4v4H7zm6 0h4v4h-4zm-6 6h4v4H7zm8 0h2v2h-2zm-2 2h2v2h-2zm2 0h2v2h-2z" opacity=".9"/></svg>';
+  function camAvailable() {
+    return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+      && !!(window.matchMedia && window.matchMedia('(any-pointer: coarse)').matches);
+  }
+  const camButton = label => camAvailable() ? `<button class="btn big cam-btn" type="button" data-cam aria-label="${esc(label)}">${camIcon}<span>Načíst QR</span></button>` : '';
+
+  let zxingLoad = null;
+  function loadZxing() {
+    if (window.ZXing) return Promise.resolve(window.ZXing);
+    if (!zxingLoad) {
+      zxingLoad = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'static/vendor/zxing.min.js?v=' + encodeURIComponent(app.dataset.version || '');
+        s.onload = () => (window.ZXing ? resolve(window.ZXing) : reject(new Error('Čtení kódů se nepodařilo spustit.')));
+        s.onerror = () => { zxingLoad = null; reject(new Error('Čtení kódů se nepodařilo načíst. Zkontroluj připojení.')); };
+        document.head.append(s);
+      });
+    }
+    return zxingLoad;
+  }
+  /** Funkce, která z jednoho snímku videa vrátí text kódu, nebo null. */
+  async function codeDecoder() {
+    if ('BarcodeDetector' in window) {
+      try {
+        const supported = await window.BarcodeDetector.getSupportedFormats();
+        const formats = CAM_FORMATS.filter(f => supported.includes(f));
+        if (formats.length) {
+          const detector = new window.BarcodeDetector({ formats });
+          return async video => { const codes = await detector.detect(video); return codes.length ? codes[0].rawValue : null; };
+        }
+      } catch (e) { /* zkusí se ZXing */ }
+    }
+    const Z = await loadZxing();
+    const reader = new Z.MultiFormatReader();
+    reader.setHints(new Map([[Z.DecodeHintType.TRY_HARDER, true]]));
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    return async video => {
+      const scale = Math.min(1, 960 / video.videoWidth);
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      try { return reader.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(canvas)))).getText(); }
+      catch (e) { return null; } finally { reader.reset(); }
+    };
+  }
+  function camError(err) {
+    const name = err && err.name;
+    if (name === 'NotAllowedError' || name === 'SecurityError') return 'Prohlížeč nemá povolení k fotoaparátu. Povol ho v nastavení stránky (ikona vedle adresy) a zkus to znovu.';
+    if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'Zařízení nemá fotoaparát, nebo ho nejde použít.';
+    if (name === 'NotReadableError' || name === 'AbortError') return 'Fotoaparát právě používá jiná aplikace. Zavři ji a zkus to znovu.';
+    return (err && err.message) || 'Fotoaparát se nepodařilo zapnout.';
+  }
+
+  /**
+   * Fotoaparát přes celou obrazovku. Jednotlivě se po prvním kódu zavře a zavolá onCode(kód).
+   * Vícenásobně (continuous) čte dál, dokud uživatel neklikne Hotovo; onCode vrátí {kind, text, close}
+   * pro řádek stavu. Stejný kód se za jedno otevření zpracuje jen jednou.
+   */
+  function openCamera({ title, continuous, onCode }) {
+    return new Promise(resolve => {
+      const back = document.activeElement;
+      const d = document.createElement('dialog');
+      d.className = 'cam-dlg';
+      d.innerHTML = `<div class="cam-box"><video muted playsinline autoplay aria-label="Náhled fotoaparátu"></video><div class="cam-frame" aria-hidden="true"></div>
+        <div class="cam-top"><b>${esc(title)}</b><button class="cam-x" type="button" data-camclose aria-label="Zavřít fotoaparát">✕</button></div>
+        <div class="cam-bottom"><p class="cam-state" aria-live="polite">Zapínám fotoaparát…</p>
+          <div class="cam-acts"><button class="btn" type="button" data-torch hidden>Světlo</button><button class="btn primary" type="button" data-camclose>${continuous ? 'Hotovo' : 'Zavřít'}</button></div></div></div>`;
+      document.body.append(d);
+      const video = $('video', d), state = $('.cam-state', d);
+      const seen = new Set();
+      let stream = null, active = true, count = 0;
+      const setState = (text, kind) => { state.textContent = text; state.className = 'cam-state' + (kind ? ' ' + kind : ''); };
+      const close = () => {
+        if (!active) return;
+        active = false;
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        d.close(); d.remove();
+        if (back && back.focus && document.contains(back)) back.focus();
+        resolve(count);
+      };
+      $$('[data-camclose]', d).forEach(b => { b.onclick = close; });
+      d.addEventListener('cancel', e => { e.preventDefault(); close(); });
+      d.showModal();
+      (async () => {
+        try {
+          if (!window.isSecureContext) throw new Error('Fotoaparát funguje jen přes HTTPS.');
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+          if (!active) { stream.getTracks().forEach(t => t.stop()); return; }
+          video.srcObject = stream;
+          await video.play().catch(() => {});
+          const track = stream.getVideoTracks()[0];
+          const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+          if (caps && caps.torch) {
+            const tb = $('[data-torch]', d);
+            let on = false;
+            tb.hidden = false;
+            tb.onclick = async () => { on = !on; try { await track.applyConstraints({ advanced: [{ torch: on }] }); tb.classList.toggle('primary', on); } catch (e) { on = false; } };
+          }
+          const decode = await codeDecoder();
+          if (!active) return;
+          setState(continuous ? 'Míř na QR kódy průvodek jeden po druhém.' : 'Míř na QR kód průvodky.');
+          const tick = async () => {
+            if (!active) return;
+            let text = null;
+            if (video.readyState >= 2 && video.videoWidth) { try { text = await decode(video); } catch (e) { text = null; } }
+            const code = text ? SC.clean(text) : '';
+            if (code && active) {
+              if (!continuous) {
+                if (navigator.vibrate) navigator.vibrate(60);
+                count = 1;
+                close();
+                onCode(code);
+                return;
+              }
+              if (!seen.has(code.toLowerCase())) {
+                seen.add(code.toLowerCase());
+                if (navigator.vibrate) navigator.vibrate(60);
+                count++;
+                const r = onCode(code) || {};
+                setState(r.text || `Načteno: ${code}`, r.kind || 'ok');
+                if (r.close) { close(); return; }
+              }
+            }
+            setTimeout(tick, 150);
+          };
+          tick();
+        } catch (err) {
+          setState(camError(err), 'err');
+        }
+      })();
+    });
+  }
+
   async function copyText(text, button) {
     try { await navigator.clipboard.writeText(text); }
     catch (e) {
@@ -453,9 +593,9 @@
         <div class="scan-top"><div><p class="eyebrow">${deptDot(ST.dept)}${esc(ST.deptName)}</p><h1>${label}</h1></div>
           <label class="switch"><input type="checkbox" id="optMulti"${opts.multi ? ' checked' : ''}><span class="track"></span><span>${isIn ? 'Vícenásobný příjem' : 'Vícenásobný export'}</span></label></div>
         <form id="scanForm" autocomplete="off" novalidate>
-          <label class="scan-label" for="scanInput">Načti barcode průvodky čtečkou</label>
+          <label class="scan-label" for="scanInput">Načti barcode průvodky čtečkou${camAvailable() ? ' nebo fotoaparátem' : ''}</label>
           <div class="scan-row"><input id="scanInput" class="scan-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="${ST.limits.barcode + 20}" placeholder="Barcode nebo QR průvodky" aria-describedby="scanHint">
-            <button class="btn primary big" type="submit" id="scanBtn"></button></div>
+            <div class="scan-btns">${camButton('Načíst QR kód průvodky fotoaparátem')}<button class="btn primary big" type="submit" id="scanBtn"></button></div></div>
           <p class="scan-hint" id="scanHint"></p>
           ${isIn ? `<div class="scan-opts"><label class="check"><input type="checkbox" id="optPos"${opts.pos ? ' checked' : ''}> Definovat pozici kam se umístí</label>
             <input id="posInput" class="pos-input" type="text" list="posList" maxlength="${ST.limits.position}" placeholder="Pozice, např. Regál A3" value="${esc(opts.position)}" aria-label="Pozice, kam se díly umístí"${opts.pos ? '' : ' hidden'}>
@@ -477,7 +617,8 @@
         : isIn ? 'Po načtení se příjem hned zapíše.' : 'Po načtení zadej počet kusů a potvrď Enterem.';
       batchBox.hidden = !opts.multi;
     }
-    function focusScan() { if (!pending) input.focus(); }
+    let viaCamera = false;   // poslední kód z fotoaparátu: pole nefokusovat, na telefonu by vyjela klávesnice
+    function focusScan() { if (!pending && !viaCamera) input.focus(); }
     function position() { return isIn && opts.pos ? SC.clean(posBox.value).replace(/\s+/g, ' ') : ''; }
     function needPosition() {
       if (!isIn || !opts.pos || position()) return false;
@@ -594,9 +735,13 @@
         beep('warn');
         showResult('warn', 'Už je v seznamu', ['Tahle průvodka už je mezi načtenými.'], batch[dup].code);
         renderBatch(dup);
-        return;
+        return { kind: 'warn', text: `Už je v seznamu: ${batch[dup].code}` };
       }
-      if (batch.length >= ST.limits.batch) { beep('err'); showResult('err', 'Seznam je plný', [`Najednou jde zapsat nejvýš ${ST.limits.batch} průvodek. Nejdřív zapiš načtené.`]); return; }
+      if (batch.length >= ST.limits.batch) {
+        beep('err');
+        showResult('err', 'Seznam je plný', [`Najednou jde zapsat nejvýš ${ST.limits.batch} průvodek. Nejdřív zapiš načtené.`]);
+        return { kind: 'err', text: 'Seznam je plný. Nejdřív zapiš načtené.', close: true };
+      }
       batch.push({ code, qty: '', info: undefined, status: '', msg: '' });
       saveBatch();
       beep('ok');
@@ -606,6 +751,7 @@
       lastInfo(code).then(l => { item.info = l === undefined ? undefined : l; updateInfo(item); });
       if (!isIn) { const q = $(`[data-q="${batch.length - 1}"]`); if (q) q.focus(); }
       else focusScan();
+      return { kind: 'ok', text: `Přidáno: ${code} (v seznamu ${batch.length})` };
     }
 
     function infoHtml(item) {
@@ -721,20 +867,39 @@
       // některé čtečky končí tabulátorem místo Enteru
       if (e.key === 'Tab' && !e.shiftKey && input.value.trim()) { e.preventDefault(); form.requestSubmit(); }
     });
-    form.addEventListener('submit', e => {
-      e.preventDefault();
-      const n = SC.normalize(input.value, { fix: store.get('fixLayout', true) });
-      input.value = '';
-      if (!n.code) { focusScan(); return; }
-      if (n.code.length > ST.limits.barcode) { beep('err'); showResult('err', 'Barcode je příliš dlouhý', [`Nejvýš ${ST.limits.barcode} znaků. Načetla se možná dvě čtení najednou.`]); return; }
+    /** Kód ze čtečky (píše jako klávesnice) nebo z fotoaparátu. Vrací stav pro fotoaparát. */
+    function handleCode(raw, fromCamera) {
+      // z fotoaparátu jde text kódu přímo, rozložení klávesnice se opravuje jen u čtečky
+      viaCamera = !!fromCamera;
+      const n = fromCamera ? { code: SC.clean(raw), fixed: false } : SC.normalize(raw, { fix: store.get('fixLayout', true) });
+      if (!n.code) { focusScan(); return {}; }
+      if (n.code.length > ST.limits.barcode) {
+        beep('err');
+        showResult('err', 'Barcode je příliš dlouhý', [`Nejvýš ${ST.limits.barcode} znaků. Načetla se možná dvě čtení najednou.`]);
+        return { kind: 'err', text: 'Kód je příliš dlouhý.' };
+      }
       if (n.fixed) toast(`Opraveno rozložení klávesnice čtečky: ${n.original} → ${n.code}`, 'warn', 6000);
       if (opts.multi) {
-        if (isIn && opts.pos && !position()) { needPosition(); input.value = n.code; return; }
-        addToBatch(n.code);
-      } else {
-        single(n.code);
+        if (isIn && opts.pos && !position()) { input.value = n.code; needPosition(); return { kind: 'err', text: 'Nejdřív vyplň pozici.', close: true }; }
+        return addToBatch(n.code);
       }
+      single(n.code);
+      return {};
+    }
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const raw = input.value;
+      input.value = '';
+      handleCode(raw, false);
     });
+    const cam = $('[data-cam]', form);
+    if (cam) {
+      cam.onclick = () => {
+        if (pending) { pending = null; qtyPanel.hidden = true; qtyPanel.innerHTML = ''; }
+        if (opts.multi && needPosition()) return;
+        openCamera({ title: `${label} · ${ST.deptName}`, continuous: opts.multi, onCode: code => handleCode(code, true) });
+      };
+    }
     $('#optMulti').addEventListener('change', e => {
       opts.multi = e.target.checked; saveOpts(); syncTexts(); renderBatch();
       if (pending) { pending = null; qtyPanel.hidden = true; qtyPanel.innerHTML = ''; }
@@ -823,7 +988,7 @@
         <div class="card-head"><div><h1>Přehled</h1><p class="hint mt-4">Vyhledej průvodku podle barcodu. Záznamy jsou od nejnovějšího, nahoře je vždy poslední záznam.</p></div></div>
         <form class="search-row" id="searchForm" role="search" autocomplete="off" novalidate>
           <input id="searchInput" class="scan-input" type="search" placeholder="Vyhledat barcode (načti čtečkou nebo napiš část)" autocapitalize="off" spellcheck="false" maxlength="${ST.limits.barcode + 20}" aria-label="Vyhledat barcode">
-          <button class="btn primary big" type="submit">Vyhledat</button>
+          <div class="scan-btns">${camButton('Vyhledat průvodku podle QR kódu fotoaparátem')}<button class="btn primary big" type="submit">Vyhledat</button></div>
         </form>
       </section>
       <div id="searchOut" class="stack-18"></div>
@@ -884,6 +1049,8 @@
 
     out.addEventListener('click', e => { const b = e.target.closest('[data-cancel-rec]'); if (b) cancelRecord(+b.dataset.cancelRec, () => search(sInput.value)); });
     $('#searchForm').addEventListener('submit', e => { e.preventDefault(); clearTimeout(timer); search(sInput.value, true); });
+    const scam = $('#searchForm [data-cam]');
+    if (scam) scam.onclick = () => openCamera({ title: 'Vyhledat průvodku', continuous: false, onCode: code => { clearTimeout(timer); sInput.value = code; search(code); } });
     sInput.addEventListener('input', () => {
       clearTimeout(timer);
       const v = sInput.value.trim();

@@ -83,6 +83,22 @@ Když je čtečka nastavená na anglickou klávesnici a Windows mají českou, n
 uživatele (Oprava české klávesnice). Trvale to vyřeší nastavení čtečky na české rozložení nebo
 na zadávání přes Alt-kódy.
 
+### Fotoaparát na telefonu a tabletu
+
+Na zařízení s dotykovou obrazovkou je vedle pole pro barcode tlačítko **Načíst QR** (v Příjmu,
+Exportu i Přehledu). Otevře zadní fotoaparát přes celou obrazovku; stačí namířit na QR kód
+průvodky. Jednotlivě se fotoaparát po načtení zavře a pokračuje se jako po čtečce (příjem se
+zapíše, u exportu se zadá počet kusů). Ve vícenásobném režimu zůstane otevřený, každý nový kód
+přidá do seznamu (stejný jen jednou) a zavře se tlačítkem **Hotovo**. Kde to telefon umí, jde
+zapnout **Světlo**.
+
+- Prohlížeč se poprvé zeptá na povolení fotoaparátu; povol ho. Když ho omylem zakážeš, povolíš
+  ho v nastavení stránky (ikona vedle adresy).
+- Android (Chrome) čte kódy sám, iPhone a iPad (Safari) přes přibalenou knihovnu ZXing
+  (`static/vendor/zxing.min.js`, licence Apache 2.0, načte se až při prvním otevření fotoaparátu).
+  QR kódy čte obojí spolehlivě, čárové kódy podle kvality fotoaparátu a světla.
+- Na počítači tlačítko není, tam se čte čtečkou.
+
 ## Instalace a aktualizace (Ubuntu + Apache)
 
 ```bash
