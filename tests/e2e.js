@@ -277,6 +277,11 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     [st, body] = await j('/api/v1/watch', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: 'https://script.google.com/macros/s/AKfycbxE2Etest1234567890urg/exec', secret: 'u'.repeat(64), kind: 'urgent', family: true, ref: 'urg#1',
         name: 'Urgenty / List 1', barcodes: ['12345.678901.23456'], notes: { '12345.678901.23456': 'zákazník čeká' } }) });
+    const pLink = 'https://is.example/commission.production.detail/default/1?activeBarcode=12345.678902.23411&componentProductionId=2';
+    [st] = await j('/api/v1/watch', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: 'https://script.google.com/macros/s/AKfycbxE2Etest1234567890sta/exec', secret: 's'.repeat(64), ref: 'stav#1', name: 'Kooperace / List 1',
+        barcodes: ['12345.678902.23411'], info: { '12345.678902.23411': { order: 'OBJ-2026-001', ean: '8590000000017', eanAssembly: '8590000000024', index: '03', link: pLink } } }) });
+    check(st === 200, 'API: tabulka Stav průvodek s údaji k průvodce (víc tabulek na jednom klíči)');
     check(st === 200 && body.watching === 1, 'API: tabulka s urgenty se připojí');
     await page.click('[data-tab=prijem]');
     await page.waitForSelector('#scanInput');
@@ -284,6 +289,10 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     await scan(page, '12345.678902.23411');
     await waitResult(page, /URGENT/);
     check((await resultText(page)).includes('Poddíl urgentní sestavy 12345.678901.23456'), 'příjem poddílu urgentní sestavy: výsledek ho označí');
+    const res = await resultText(page);
+    check(res.includes('OBJ-2026-001') && res.includes('8590000000017') && res.includes('8590000000024') && res.includes('03'), 'výsledek skenu: objednávka, EAN, EAN sestavy a index z tabulky');
+    const a = page.locator('#scanResult a.pi-link');
+    check(await a.getAttribute('href') === pLink && await a.getAttribute('target') === '_blank' && (await a.getAttribute('rel')).includes('noopener'), 'odkaz z tabulky jde otevřít (nové okno)');
     await page.waitForSelector('#urgentBar:not([hidden])');
     const bar = await page.locator('#urgentBar').innerText();
     check(bar.includes('Urgent na pracovišti') && bar.includes('12345.678902.23411') && bar.includes('zákazník čeká'), 'pás „Urgent na pracovišti“ s průvodkou a poznámkou');

@@ -88,6 +88,9 @@ POST api/v1/watch
   kde leží, svítí pracovníkům upozornění, dokud odtamtud neodejdou exportem). `notes`: objekt
   `{"barcode": "poznámka"}` k urgentům. `family: true`: urgentní jsou i poddíly sestavy (liší se jen
   posledním dvojčíslím ve 2. a 3. části: `12345.678901.23456` → `12345.6789xx.234xx`).
+- `info` (od 1.5): objekt `{"barcode": {"order": …, "ean": …, "eanAssembly": …, "index": …, "link": "https://…"}}`
+  s údaji k průvodce, které Evidence ukáže pracovníkům (odkaz jen http/https). Tělo požadavku `watch`
+  smí mít až 12 MB.
 - `GET watch?ref=…` a `DELETE watch?ref=…` platí pro jednu tabulku; bez `ref` pro všechny tabulky klíče
   (`sheets` v odpovědi GET).
 - Odpověď: `watching`, `found` a `results` = poslední záznamy nalezených průvodek

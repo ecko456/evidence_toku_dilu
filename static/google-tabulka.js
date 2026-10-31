@@ -1,5 +1,5 @@
 /**
- * Evidence toku dílů → Google tabulka: živé propojení (verze 1.4)
+ * Evidence toku dílů → Google tabulka: živé propojení (verze 1.5)
  *
  * Skript najde ve sloupci s barcody (nebo s odkazy, ve kterých je barcode) průvodky, pošle jejich
  * seznam do Evidence a do výsledkového sloupce zapíše poslední záznam. Když pak někdo průvodku
@@ -25,6 +25,10 @@ const ETD = {
   typ: 'stav',                                      // 'stav' = stav průvodek, 'urgent' = průvodky v tabulce jsou urgentní
   sloupecPoznamka: '',                              // u urgentů: sloupec s poznámkou (zobrazí se pracovníkům); '' = bez poznámky
   podDily: true,                                    // u urgentů: urgentní jsou i poddíly sestavy (12345.6789xx.234xx)
+  sloupecObjednavka: '',                            // údaje k průvodce, které Evidence ukáže (i s odkazem z buňky s barcodem):
+  sloupecEanSestavy: '',                            //   číslo objednávky, EAN sestavy, index; '' = sloupec nepoužívat
+  sloupecIndex: '',
+  textJeEan: true,                                  // text buňky s odkazem je EAN (ukáže se jako EAN)
 };
 // </nastaveni>
 
@@ -156,7 +160,7 @@ function etdVypnout() {
 function etdPriUprave(e) {
   const r = e && e.range;
   if (!r || r.getSheet().getName() !== etdList().getName()) return;
-  const cols = [ETD.sloupecBarcode, ETD.sloupecPoznamka].filter(Boolean).map(etdSloupec);
+  const cols = [ETD.sloupecBarcode, ETD.sloupecPoznamka, ETD.sloupecObjednavka, ETD.sloupecEanSestavy, ETD.sloupecIndex].filter(Boolean).map(etdSloupec);
   if (!cols.some(col => r.getColumn() <= col && r.getLastColumn() >= col)) return;
   etdSync(false);
 }
@@ -226,7 +230,8 @@ function etdSync(ping) {
   lock.waitLock(30000);
   try {
     const sheet = etdList();
-    const codes = etdNactiBarcody(sheet);
+    const rows = etdNactiRadky(sheet);
+    const codes = rows.map(r => r.code);
     const unique = [];
     const seen = {};
     codes.forEach(c => { if (c && !seen[c.toLowerCase()]) { seen[c.toLowerCase()] = true; unique.push(c); } });
@@ -235,6 +240,20 @@ function etdSync(ping) {
       sheet.getRange(ETD.prvniRadek, etdSloupec(ETD.sloupecPoznamka), codes.length, 1).getDisplayValues()
         .forEach((r, i) => { const t = String(r[0]).trim(); if (codes[i] && t && !notes[codes[i]]) notes[codes[i]] = t.slice(0, 200); });
     }
+    // údaje k průvodce (Stav průvodek): číslo objednávky, EAN (text buňky s odkazem), EAN sestavy, index, odkaz
+    const info = {};
+    const col = c => (c && codes.length ? sheet.getRange(ETD.prvniRadek, etdSloupec(c), codes.length, 1).getDisplayValues().map(r => String(r[0]).trim()) : null);
+    const order = col(ETD.sloupecObjednavka), eanAsm = col(ETD.sloupecEanSestavy), index = col(ETD.sloupecIndex);
+    rows.forEach((r, i) => {
+      if (!r.code || info[r.code]) return;
+      const it = {};
+      if (r.link) it.link = r.link;
+      if (ETD.textJeEan && r.text && r.text !== r.code) it.ean = r.text;
+      if (order && order[i]) it.order = order[i];
+      if (eanAsm && eanAsm[i]) it.eanAssembly = eanAsm[i];
+      if (index && index[i]) it.index = index[i];
+      if (Object.keys(it).length) info[r.code] = it;
+    });
     const res = etdApi('post', 'watch', {
       url: props.getProperty('ETD_WEBAPP'),
       secret: props.getProperty('ETD_SECRET'),
@@ -244,6 +263,7 @@ function etdSync(ping) {
       ref: etdRef(),
       barcodes: unique,
       notes: notes,
+      info: info,
       ping: !!ping,
     });
     const mapa = {};
@@ -257,24 +277,38 @@ function etdSync(ping) {
 
 /** Barcode v každém řádku od prvniRadek (nebo '' když tam žádný není). */
 function etdNactiBarcody(sheet) {
+  return etdNactiRadky(sheet).map(r => r.code);
+}
+
+/**
+ * Každý řádek od prvniRadek: barcode ('' když tam žádný není), odkaz z buňky (hypertextový odkaz,
+ * vzorec HYPERLINK nebo adresa jako text) a text buňky (u tabulky Stav průvodek je to EAN).
+ */
+function etdNactiRadky(sheet) {
   const n = sheet.getLastRow() - ETD.prvniRadek + 1;
   if (n < 1) return [];
   const range = sheet.getRange(ETD.prvniRadek, etdSloupec(ETD.sloupecBarcode), n, 1);
   const display = range.getDisplayValues();
-  if (!ETD.parametrOdkazu) return display.map(r => String(r[0]).trim());
   const rich = range.getRichTextValues();
   const formulas = range.getFormulas();
-  const re = new RegExp('[?&]' + ETD.parametrOdkazu.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^&#"\\s]+)', 'i');
+  const re = ETD.parametrOdkazu ? new RegExp('[?&]' + ETD.parametrOdkazu.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^&#"\\s]+)', 'i') : null;
   return display.map((r, i) => {
-    const texty = [formulas[i][0], r[0]];
+    const text = String(r[0]).trim();
+    const urls = [];
     const rt = rich[i][0];
     if (rt) {
-      texty.push(rt.getLinkUrl());
-      rt.getRuns().forEach(run => texty.push(run.getLinkUrl()));
+      urls.push(rt.getLinkUrl());
+      rt.getRuns().forEach(run => urls.push(run.getLinkUrl()));
     }
-    const m = re.exec(texty.filter(Boolean).join(' '));
-    if (!m) return '';
-    try { return decodeURIComponent(m[1]).trim(); } catch (err) { return m[1].trim(); }
+    [formulas[i][0], text].forEach(t => { (String(t || '').match(/https?:\/\/[^\s"';<>]+/g) || []).forEach(u => urls.push(u)); });
+    const links = urls.filter(Boolean);
+    if (!re) return { code: text, link: links[0] || '', text: text };
+    const link = links.find(u => re.test(u)) || '';
+    const m = re.exec(link);
+    if (!m) return { code: '', link: '', text: text };
+    let code;
+    try { code = decodeURIComponent(m[1]).trim(); } catch (err) { code = m[1].trim(); }
+    return { code: code, link: link, text: text };
   });
 }
 

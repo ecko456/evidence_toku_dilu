@@ -548,6 +548,35 @@ tr.u-there td { background: color-mix(in srgb, var(--crit) 7%, transparent); }
 .gs-cell.urgent-demo { border-color: var(--crit); box-shadow: inset 3px 0 0 var(--crit); }
 @media (max-width: 760px) { .urgent-in, .urgent-list { padding-left: 14px; padding-right: 14px; } .urgent-txt span { display: none; } }
 
+/* ---------- údaje k průvodce z tabulky (objednávka, EAN, …, odkaz) ---------- */
+.part-info { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.part-info .pi small { color: var(--ink-3); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+.part-info .pi b { font-family: var(--mono); font-size: .92rem; }
+.part-info.compact { gap: 2px 10px; font-size: .85rem; }
+.part-info.compact .pi b { font-size: .82rem; }
+.pi-link { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); font-weight: 700; font-size: .85rem; text-decoration: none; white-space: nowrap; }
+.pi-link:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.urgent-item .part-info .pi small, .urgent-item .part-info .pi b { color: #fff; }
+.urgent-item .pi-link { color: #fff; border-color: rgba(255, 255, 255, .5); background: rgba(255, 255, 255, .12); }
+.gs-info { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 14px; border: 1px dashed var(--line-2); border-radius: var(--radius-s); padding: 10px 14px 4px; margin: 2px 0 12px; }
+.gs-info legend { padding: 0 6px; font-weight: 700; font-size: .9rem; color: var(--ink-2); }
+.gs-info .field { margin-bottom: 8px; }
+.gs-ean { grid-column: 1 / -1; margin-bottom: 8px; }
+@media (max-width: 760px) { .gs-info { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- díly sestavy (rozbalovací seznam u urgentu) ---------- */
+.asm { flex-basis: 100%; margin-top: 4px; }
+.asm summary { cursor: pointer; font-weight: 700; font-size: .85rem; color: var(--accent); }
+.asm-list { display: grid; gap: 4px; margin-top: 6px; }
+.asm-row { display: grid; grid-template-columns: minmax(150px, max-content) minmax(0, 1fr) minmax(0, max-content) max-content; gap: 4px 14px; align-items: center; padding: 5px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); font-size: .9rem; }
+.asm-row.there { border-color: color-mix(in srgb, var(--crit) 45%, var(--line)); background: color-mix(in srgb, var(--crit) 7%, var(--surface)); }
+.asm.light summary { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
+.asm.light .asm-row { background: rgba(0, 0, 0, .18); border-color: rgba(255, 255, 255, .2); color: #fff; }
+.asm.light .asm-row.there { background: rgba(255, 255, 255, .16); border-color: rgba(255, 255, 255, .55); }
+.asm.light .asm-row .muted, .asm.light .asm-row .code-btn { color: #fff; }
+.asm-row .code-btn { white-space: nowrap; }
+@media (max-width: 760px) { .asm-row { grid-template-columns: minmax(0, 1fr) max-content; } .asm-row > .code-btn { grid-column: 1 / -1; } }
+
 /* ---------- pomocné třídy (CSP nepovoluje style="…") ---------- */
 .mt-4 { margin-top: 4px; }
 .mt-10 { margin-top: 10px; }

@@ -129,7 +129,7 @@ switch ($endpoint) {
         if ($method !== 'POST') {
             etd_api_error('method_not_allowed', 'Použij GET (stav), POST (seznam barcodů) nebo DELETE (vypnutí).', 405);
         }
-        $input = etd_input();
+        $input = etd_input(ETD_WATCH_MAX_BYTES);
         $url = etd_hook_url_normalize((string)($input['url'] ?? ''));
         $secret = (string)($input['secret'] ?? '');
         $codes = $input['barcodes'] ?? null;
@@ -149,12 +149,16 @@ switch ($endpoint) {
         if (!is_array($notes) || ($notes !== [] && array_is_list($notes))) {
             etd_api_error('bad_request', '"notes" musí být objekt {"barcode": "poznámka"}.', 400);
         }
+        $info = $input['info'] ?? [];
+        if (!is_array($info) || ($info !== [] && array_is_list($info))) {
+            etd_api_error('bad_request', '"info" musí být objekt {"barcode": {"order": …, "ean": …, "eanAssembly": …, "index": …, "link": …}}.', 400);
+        }
         $kind = (string)($input['kind'] ?? 'status');
         if (!isset(ETD_HOOK_KINDS[$kind])) {
             etd_api_error('bad_request', '"kind" musí být "status" (stav průvodek) nebo "urgent" (urgenty).', 400);
         }
         $reg = etd_hook_register($key, $url, $secret, $codes, ['kind' => $kind, 'name' => $input['name'] ?? '', 'ref' => $input['ref'] ?? '', 'notes' => $notes,
-            'family' => !empty($input['family'])]);
+            'family' => !empty($input['family']), 'info' => $info]);
         $results = [];
         foreach ($reg['codes'] as $code) {
             $item = etd_hook_item($code);

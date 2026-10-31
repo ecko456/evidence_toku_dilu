@@ -146,8 +146,23 @@ Apps Script, nasazení jako webová aplikace (spustit jako Já, přístup Kdokol
   - **Poddíly sestavy:** volba „Urgentní jsou i poddíly sestavy“ (výchozí zapnutá). Poddíl se od
     sestavy liší jen posledním dvojčíslím ve 2. a 3. části čísla: k urgentní sestavě
     `12345.678901.23456` patří i `12345.6789xx.234xx`. Pracovník vidí „poddíl sestavy …“.
+  - **Díly sestavy:** u urgentní sestavy (i u jejího poddílu v pásu urgentů) je rozbalovací seznam
+    **Díly sestavy** se stavem každého dílu, který už má záznam: kde je, pozice nebo počet kusů, od kdy.
+    V záložce Na pracovištích má každá sestava jeden řádek a poddíly jsou v jejím seznamu.
   - Urgent smazaný z tabulky přestane svítit, jakmile tabulka pošle nový seznam (po úpravě ve
     sloupci hned, jinak do hodiny).
+
+### Údaje k průvodce z tabulky (od verze 1.5)
+
+Tabulka Stav průvodek může k průvodce poslat **číslo objednávky, EAN, EAN sestavy a index**
+a **odkaz** z buňky s barcodem (hypertextový odkaz do IS). V generátoru vyplníš sloupce
+(Údaje k průvodce) a zaškrtneš, že text buňky s odkazem je EAN. Evidence je pak ukáže:
+
+- ve výsledku skenu (příjem i export), v okně pro počet kusů, v Přehledu u posledního záznamu
+  i ve výsledcích hledání, v Na pracovištích a v pásu urgentů,
+- s tlačítkem **Otevřít odkaz ↗**, které otevře průvodku v IS v novém okně.
+
+Odkaz se bere jen `http://` nebo `https://`; jiné se neuloží. Po odpojení tabulky údaje zmizí.
 
 ## Instalace a aktualizace (Ubuntu + Apache)
 

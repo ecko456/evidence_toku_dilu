@@ -204,6 +204,10 @@ switch ($action) {
             if ($r['status'] === 'ok' && ($m = etd_urgent_match((string)$r['barcode'])) !== null) {
                 $r['urgent'] = ['note' => $m['note']] + (isset($m['of']) ? ['of' => $m['of'], 'mask' => $m['mask']] : []);
             }
+            // údaje z tabulky Stav průvodek (číslo objednávky, EAN, …, odkaz)
+            if (in_array($r['status'], ['ok', 'duplicate'], true) && ($info = etd_part_info((string)$r['barcode'])) !== null) {
+                $r['info'] = $info;
+            }
         }
         unset($r);
         $written = count(array_filter($results, static fn(array $r): bool => $r['status'] === 'ok'));
@@ -242,7 +246,7 @@ switch ($action) {
             etd_fail('Neplatný barcode.');
         }
         $last = etd_last($code);
-        etd_json(['barcode' => $code, 'last' => $last === null ? null : etd_record_public($last)]);
+        etd_json(['barcode' => $code, 'last' => $last === null ? null : etd_record_public($last), 'info' => etd_part_info($code)]);
 
     case 'recent':
         // poslední záznamy na pracovišti přihlášeného (pod skenováním)
@@ -289,11 +293,12 @@ switch ($action) {
         if ($history) {
             $last = etd_last($q);
             $um = etd_urgent_match($q);
-            $exact = ['urgent' => $um === null ? null : $um['note'], 'urgentOf' => $um['of'] ?? null, 'barcode' => $last['barcode'] ?? $history[0]['barcode'], 'last' => $last === null ? null : etd_record_public($last) + ['canCancel' => etd_can_cancel($session, $last)],
+            $exact = ['urgent' => $um === null ? null : $um['note'], 'urgentOf' => $um['of'] ?? null, 'info' => etd_part_info($q), 'barcode' => $last['barcode'] ?? $history[0]['barcode'], 'last' => $last === null ? null : etd_record_public($last) + ['canCancel' => etd_can_cancel($session, $last)],
                 'history' => etd_records_for($session, $history), 'count' => (int)(etd_one('SELECT COUNT(*) AS n FROM records WHERE barcode = ? COLLATE NOCASE', [$q])['n'] ?? 0)];
         }
         $rows = etd_all("SELECT r.* FROM parts p JOIN records r ON r.id = p.last_id WHERE p.barcode LIKE ? ESCAPE '\\' AND p.barcode <> ? ORDER BY p.updated_at DESC, p.last_id DESC LIMIT 51", [etd_like($q), $q]);
-        etd_json(['q' => $q, 'exact' => $exact, 'matches' => array_map('etd_record_public', array_slice($rows, 0, 50)), 'more' => count($rows) > 50]);
+        etd_json(['q' => $q, 'exact' => $exact, 'matches' => array_map(static fn(array $r): array => etd_record_public($r) + ['info' => etd_part_info((string)$r['barcode'])], array_slice($rows, 0, 50)),
+            'more' => count($rows) > 50]);
 
     case 'onsite':
         // průvodky, jejichž poslední záznam je příjem na daném pracovišti (jsou tam a ještě neodešly)
@@ -302,7 +307,8 @@ switch ($action) {
         foreach (ETD_DEPTS as $code => $name) {
             $total = (int)(etd_one("SELECT COUNT(*) AS n FROM parts WHERE last_dept = ? AND last_action = 'prijem'", [$code])['n'] ?? 0);
             $rows = etd_all("SELECT r.* FROM parts p JOIN records r ON r.id = p.last_id WHERE p.last_dept = ? AND p.last_action = 'prijem' ORDER BY p.updated_at DESC LIMIT 500", [$code]);
-            $out[] = ['code' => $code, 'name' => $name, 'total' => $total, 'records' => array_map('etd_record_public', $rows)];
+            $out[] = ['code' => $code, 'name' => $name, 'total' => $total,
+                'records' => array_map(static fn(array $r): array => etd_record_public($r) + ['info' => etd_part_info((string)$r['barcode'])], $rows)];
         }
         $urgent = array_map(static fn(array $u): string => mb_strtolower($u['barcode']), etd_urgent_list());
         etd_json(['depts' => $out, 'urgent' => $urgent, 'urgentCounts' => (object)etd_urgent_counts()]);
@@ -312,7 +318,7 @@ switch ($action) {
         $session = etd_require_session();
         $dept = (string)$session['dept'];
         $here = isset(ETD_DEPTS[$dept]) ? etd_urgent_list($dept) : [];
-        etd_json(['dept' => $dept, 'here' => $here, 'all' => isset($_GET['all']) ? etd_urgent_list() : null, 'counts' => (object)etd_urgent_counts()]);
+        etd_json(['dept' => $dept, 'here' => $here, 'all' => isset($_GET['all']) ? etd_urgent_overview() : null, 'counts' => (object)etd_urgent_counts()]);
 
     case 'positions':
         // pozice použité na pracovišti za posledních 90 dní (návrhy do pole Pozice)

@@ -9,9 +9,9 @@ declare(strict_types=1);
  * Časy jsou v databázi jako unixové sekundy (UTC), ven jdou v pražském čase (ISO 8601).
  */
 
-const ETD_VERSION = '1.4';
+const ETD_VERSION = '1.5';
 /** Verze schématu databáze (PRAGMA user_version). Novou verzi doplň do etd_migrate(). */
-const ETD_SCHEMA = 4;
+const ETD_SCHEMA = 5;
 /** Zapisovat smí jen stránka aspoň téhle verze (hlavička X-Etd-Client), viz etd_require_client(). */
 const ETD_MIN_CLIENT = 1;
 const ETD_SESSION_COOKIE = 'etd_session';
@@ -269,7 +269,14 @@ SQL);
                 throw new RuntimeException('Kontrola cizích klíčů po aktualizaci databáze selhala.');
             }
         }
-        // Další verze schématu sem: if ($version < 5) { … }
+        if ($version < 5) {
+            // 1.5: údaje k průvodce z tabulky (číslo objednávky, EAN, EAN sestavy, index, odkaz) jako JSON
+            $columns = array_column($pdo->query('PRAGMA table_info(hook_watch)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+            if (!in_array('info', $columns, true)) {
+                $pdo->exec('ALTER TABLE hook_watch ADD COLUMN info TEXT');
+            }
+        }
+        // Další verze schématu sem: if ($version < 6) { … }
         $pdo->exec('PRAGMA user_version = ' . ETD_SCHEMA);
         $pdo->exec('COMMIT');
     } catch (Throwable $error) {
@@ -441,13 +448,13 @@ function etd_json_errors(bool $api = false): void
     });
 }
 
-function etd_input(): array
+function etd_input(int $max = ETD_MAX_JSON_BYTES): array
 {
-    $raw = file_get_contents('php://input', false, null, 0, ETD_MAX_JSON_BYTES + 1);
+    $raw = file_get_contents('php://input', false, null, 0, $max + 1);
     if ($raw === false || $raw === '') {
         return [];
     }
-    if (strlen($raw) > ETD_MAX_JSON_BYTES) {
+    if (strlen($raw) > $max) {
         etd_fail('Požadavek je příliš velký.', 413);
     }
     $decoded = json_decode($raw, true);

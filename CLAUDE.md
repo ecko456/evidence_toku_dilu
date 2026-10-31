@@ -13,7 +13,22 @@ Po každé větší práci **aktualizuj sekci „Kde jsme skončili“**.
 
 ## Kde jsme skončili
 
-Stav k 31. 10. 2026, verze **1.4** (schéma databáze 4):
+Stav k 31. 10. 2026, verze **1.5** (schéma databáze 5):
+
+- 1.5: „pokud bude shoda v tabulce Stav průvodek, doplní k položce číslo objednávky, EAN, EAN
+  sestavy a index; EAN je hypertextový odkaz, ať se jde v aplikaci prokliknout“ a „u urgentní
+  sestavy s více poddíly rozevírací menu, kde budou vidět i ostatní poddíly“.
+  - Schéma 5: `hook_watch.info` (JSON). Skript posílá `info` {barcode: {order, ean, eanAssembly,
+    index, link}} (sloupce `sloupecObjednavka`, `sloupecEanSestavy`, `sloupecIndex`, `textJeEan`;
+    odkaz a text z buňky s barcodem, `etdNactiRadky`). Server čistí `etd_info_clean` (jen známá
+    pole, odkaz jen http/https), čte `etd_part_info` (cache na požadavek). Tělo `watch` až 12 MB
+    (`etd_input($max)`, Apache `post_max_size 16M` pro api/v1); ověřeno 10 000 řádků (2,7 MB) na Apachi.
+  - Stránka: `partInfo()` ve výsledku skenu, v okně počtu kusů, Přehledu, hledání, Na pracovištích,
+    pásu urgentů; odkaz `target=_blank rel=noopener noreferrer`.
+  - Díly sestavy: `etd_family_parts` (LIKE `a.bbbb__.ccc__` + kontrola `etd_family`),
+    `etd_urgent_list` vrací `parts`, nový `etd_urgent_overview` (řádek na urgent z tabulky, poddíly
+    v `parts`, `onsite`). Stránka: `assemblyParts()` = `<details>` „Díly sestavy“, otevřené
+    zůstanou i po obnovení pásu (`asmOpen`).
 
 - 1.4: „připojit více google tabulek“ a „tabulka s urgenty: pracovníkům pro dané oddělení vyskočí
   upozornění, že mají urgent na pracovišti, a svítí, dokud neprovedou export z pracoviště“; pak
@@ -195,7 +210,8 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
 - Schéma 3 (1.3): `hooks` (propojení: url, `secret` v čitelné podobě kvůli podpisu, počítadla,
   `fails`, `retry_at`), `hook_watch` (sledované barcody, NOCASE), `hook_queue` (co poslat, `ver`),
   `meta` (`worker_seen_at`). Schéma 4 (1.4): `hooks.kind/name/ref/match_family`, `hook_watch.note`;
-  propojení = API klíč + `ref` (víc tabulek na klíč).
+  propojení = API klíč + `ref` (víc tabulek na klíč). Schéma 5 (1.5): `hook_watch.info` (údaje
+  k průvodce z tabulky jako JSON).
 - Nová verze schématu: přidej blok `if ($version < N)` do `etd_migrate` a zvyš `ETD_SCHEMA`.
   Jen přidávat (tabulky, sloupce s výchozí hodnotou), nic nemazat. Nové oddělení = nový řádek
   v `ETD_DEPTS` (kód se ukládá do záznamů, neměň ho), barva `--d-N` a třída `.dept-<kód>`
@@ -205,7 +221,7 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
 ## Vývoj a testy v cloudové session
 
 ```bash
-python3 -m unittest discover -s tests     # 40 testů, asi 20 s
+python3 -m unittest discover -s tests     # 42 testů, asi 20 s
 node tests/test_scan.js
 node tests/e2e.js                         # SHOTS=/adresář uloží snímky
 node tests/e2e_camera.js                  # fotoaparát (Chromium s --use-file-for-fake-video-capture)

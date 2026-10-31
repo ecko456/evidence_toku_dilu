@@ -113,6 +113,35 @@
   const deptTag = (code, name) => `<span class="dept-tag">${deptDot(code)}${esc(name)}</span>`;
   const actTag = r => `<span class="tag ${esc(r.action)}">${r.action === 'prijem' ? 'Příjem' : 'Export'}</span>`;
   const codeBtn = code => `<button class="code-btn" type="button" data-find="${esc(code)}">${esc(code)}</button>`;
+  /** Rozbalovací seznam dílů sestavy (sestava a poddíly) se stavem každého: kde je, pozice, od kdy. */
+  const asmOpen = new Set();   // rozbalené seznamy dílů (zůstanou otevřené i po obnovení pásu urgentů)
+  document.addEventListener('toggle', e => {
+    const d = e.target;
+    if (d && d.matches && d.matches('details.asm')) { if (d.open) asmOpen.add(d.dataset.asm); else asmOpen.delete(d.dataset.asm); }
+  }, true);
+  function assemblyParts(parts, current, light) {
+    const list = (parts || []).filter(p => p.barcode.toLowerCase() !== String(current || '').toLowerCase());
+    if (!list.length) return '';
+    const onsite = list.filter(p => p.last && p.last.action === 'prijem').length;
+    const key = String(current || (list[0] && list[0].barcode) || '').toLowerCase();
+    return `<details class="asm${light ? ' light' : ''}" data-asm="${esc(key)}"${asmOpen.has(key) ? ' open' : ''}><summary>${current && list.length < (parts || []).length ? 'Další díly sestavy' : 'Díly sestavy'}: ${num(list.length)}${onsite ? ` · ${num(onsite)} na ${onsite === 1 ? 'pracovišti' : 'pracovištích'}` : ''}</summary>
+      <div class="asm-list">${list.map(p => { const l = p.last; const there = l && l.action === 'prijem';
+        return `<div class="asm-row${there ? ' there' : ''}">${codeBtn(p.barcode)}
+          <span>${l ? (there ? deptTag(l.department, l.department_label) : `<span class="muted">${esc(l.action_label)} · ${esc(l.department_label)}</span>`) : '<span class="muted">zatím nikde</span>'}</span>
+          <span>${there && l.position ? `pozice <b>${esc(l.position)}</b>` : l && l.quantity != null ? `${num(l.quantity)} ks` : ''}</span>
+          <span class="muted small">${l ? esc(agoUnix(l.recorded_at_unix)) : ''}</span></div>`; }).join('')}</div></details>`;
+  }
+
+  /** Údaje k průvodce z Google tabulky Stav průvodek: objednávka, EAN, EAN sestavy, index a odkaz. */
+  const INFO_FIELDS = [['order', 'Objednávka'], ['ean', 'EAN'], ['eanAssembly', 'EAN sestavy'], ['index', 'Index']];
+  function partInfo(info, compact) {
+    if (!info) return '';
+    const fields = (compact ? INFO_FIELDS.filter(([k]) => k === 'order' || k === 'index') : INFO_FIELDS).filter(([k]) => info[k]);
+    const link = info.link && /^https?:\/\//i.test(info.link)
+      ? `<a class="pi-link" href="${esc(info.link)}" target="_blank" rel="noopener noreferrer" title="${esc(info.link)}">${compact ? 'Odkaz' : 'Otevřít odkaz'} ↗</a>` : '';
+    if (!fields.length && !link) return '';
+    return `<span class="part-info${compact ? ' compact' : ''}">${fields.map(([k, l]) => `<span class="pi"><small>${l}</small> <b>${esc(info[k])}</b></span>`).join('')}${link}</span>`;
+  }
   const initials = name => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
   const logo = '<img class="logo" src="static/icon.svg" alt="">';
   const recLine = r => `${r.action_label} · ${esc(r.department_label)}${r.position ? ` · pozice <b>${esc(r.position)}</b>` : ''}${r.quantity != null ? ` · <b>${num(r.quantity)} ks</b>` : ''}`;
@@ -591,7 +620,7 @@
         <div class="urgent-list"${urgentOpen ? '' : ' hidden'}>${items.map(u => `<div class="urgent-item${fresh.includes(u.barcode.toLowerCase()) ? ' new' : ''}">
           ${codeBtn(u.barcode)}${u.of ? `<span class="urgent-of" title="Shoda ${esc(u.mask || '')}">poddíl sestavy ${esc(u.of)}</span>` : ''}<span class="urgent-pos">${u.last && u.last.position ? `pozice <b>${esc(u.last.position)}</b>` : 'bez pozice'}</span>
           <span class="muted small">${u.last ? `přijato ${esc(agoUnix(u.last.recorded_at_unix))} (${esc(u.last.user)})` : ''}</span>
-          ${u.note ? `<span class="urgent-note">${esc(u.note)}</span>` : ''}</div>`).join('')}</div>`;
+          ${u.note ? `<span class="urgent-note">${esc(u.note)}</span>` : ''}${partInfo(u.info, true)}${assemblyParts(u.parts, u.barcode, true)}</div>`).join('')}</div>`;
       $('[data-utoggle]', bar).onclick = () => { urgentOpen = !urgentOpen; store.set('urgentOpen', urgentOpen); urgentShown = null; loadUrgent(); };
       if (fresh.length) { beep('warn'); toast(`⚡ Nový urgent na pracovišti: ${fresh.length === 1 ? items.find(u => u.barcode.toLowerCase() === fresh[0]).barcode : `${fresh.length} průvodek`}`, 'err', 9000); }
     } else {
@@ -702,12 +731,13 @@
           r.urgent ? `<span class="tag crit">⚡ URGENT</span> ${r.urgent.of ? `Poddíl urgentní sestavy <b>${esc(r.urgent.of)}</b>. ` : ''}${isIn ? 'Svítí na pracovišti, dokud průvodku neexportuješ.' : 'Urgent odešel z pracoviště.'}${r.urgent.note ? ` <b>${esc(r.urgent.note)}</b>` : ''}` : '',
           rec.position ? `Pozice: <b>${esc(rec.position)}</b>` : '', rec.quantity != null ? `Počet: <b>${num(rec.quantity)} ks</b>` : '',
           prev ? `Předtím: ${recLine(prev)} · ${esc(agoUnix(prev.recorded_at_unix))}` : 'První záznam této průvodky.',
+          partInfo(r.info),
         ].filter(Boolean), rec.barcode, `<span class="muted small">zapsáno ${esc(when(rec.recorded_at))}</span>`);
         beep(r.urgent && isIn ? 'warn' : 'ok');
         if (r.urgent) loadUrgent();
       } else if (r.status === 'duplicate') {
         const l = r.last;
-        showResult('warn', 'Už je zapsáno', [`${recLine(l)} · ${esc(agoUnix(l.recorded_at_unix))} (${esc(l.user)}).`, 'Nejspíš dvojí načtení. Když jde opravdu o další záznam, zapiš ho znovu.'],
+        showResult('warn', 'Už je zapsáno', [`${recLine(l)} · ${esc(agoUnix(l.recorded_at_unix))} (${esc(l.user)}).`, 'Nejspíš dvojí načtení. Když jde opravdu o další záznam, zapiš ho znovu.', partInfo(r.info)].filter(Boolean),
           r.barcode, '<button class="btn small" type="button" data-force>Zapsat znovu</button>');
         $('[data-force]', result).onclick = async () => {
           const data = await send([item], true);
@@ -756,7 +786,7 @@
           <button class="btn primary big" type="submit">Zapsat export</button><button class="btn ghost" type="button" data-qcancel>Zrušit (Esc)</button></div></form>`;
       const qf = $('#qtyForm'), qi = $('#qtyInput');
       qi.focus();
-      lastInfo(code).then(l => { const box = $('#qtyInfo'); if (box) box.innerHTML = l ? `Poslední záznam: ${recLine(l)} · ${esc(agoUnix(l.recorded_at_unix))}` : 'Průvodka zatím nemá žádný záznam.'; });
+      lastInfo(code).then(l => { const box = $('#qtyInfo'); if (box) box.innerHTML = (l ? `Poslední záznam: ${recLine(l)} · ${esc(agoUnix(l.recorded_at_unix))}` : 'Průvodka zatím nemá žádný záznam.') + (partCache.get(code.toLowerCase()) ? `<br>${partInfo(partCache.get(code.toLowerCase()))}` : ''); });
       const cancel = () => { pending = null; qtyPanel.hidden = true; qtyPanel.innerHTML = ''; input.focus(); };
       $('[data-qcancel]', qf).onclick = cancel;
       qi.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); cancel(); } });
@@ -784,10 +814,11 @@
     }
 
     const infoCache = new Map();
+    const partCache = new Map();   // údaje z tabulky (objednávka, EAN, …) podle barcodu
     async function lastInfo(code) {
       const key = code.toLowerCase();
       if (infoCache.has(key)) return infoCache.get(key);
-      try { const d = await api('last', undefined, { barcode: code }); infoCache.set(key, d.last); return d.last; } catch (e) { return undefined; }
+      try { const d = await api('last', undefined, { barcode: code }); infoCache.set(key, d.last); partCache.set(key, d.info || null); return d.last; } catch (e) { return undefined; }
     }
 
     /* --- dávka (vícenásobný příjem / export) --- */
@@ -1089,7 +1120,7 @@
       if (d.exact) {
         const l = d.exact.last;
         html += l ? `<section class="last-card" aria-label="Poslední záznam">
-            <div class="lc-head"><p class="eyebrow">Poslední záznam</p><div class="code">${esc(d.exact.barcode)}${d.exact.urgent != null ? ` <span class="tag crit" title="${esc(d.exact.urgent)}">⚡ ${d.exact.urgentOf ? `poddíl urgentu ${esc(d.exact.urgentOf)}` : 'URGENT'}</span>` : ''}</div><div>${actTag(l)} <span class="muted small">${esc(agoUnix(l.recorded_at_unix))}</span></div></div>
+            <div class="lc-head"><p class="eyebrow">Poslední záznam</p><div class="code">${esc(d.exact.barcode)}${d.exact.urgent != null ? ` <span class="tag crit" title="${esc(d.exact.urgent)}">⚡ ${d.exact.urgentOf ? `poddíl urgentu ${esc(d.exact.urgentOf)}` : 'URGENT'}</span>` : ''}</div><div>${actTag(l)} <span class="muted small">${esc(agoUnix(l.recorded_at_unix))}</span></div>${d.exact.info ? `<div class="mt-10">${partInfo(d.exact.info)}</div>` : ''}</div>
             <div class="lc-body">
               <div class="kv big"><small>Záznam</small><b>${esc(l.action_label)}</b></div>
               <div class="kv big"><small>Oddělení</small><b>${deptTag(l.department, l.department_label)}</b></div>
@@ -1104,7 +1135,7 @@
       if (d.matches.length) {
         html += `<section class="card"><div class="card-head"><h2>${d.exact ? 'Další průvodky' : 'Průvodky'} obsahující „${esc(d.q)}“<span class="count">${d.matches.length}${d.more ? '+' : ''}</span></h2><span class="hint">poslední záznam každé průvodky</span></div>
           <div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>Barcode</th><th>Poslední záznam</th><th>Oddělení</th><th>Pozice / ks</th><th>Kdy</th></tr></thead><tbody>
-          ${d.matches.map(r => `<tr><td data-wide>${codeBtn(r.barcode)}</td><td>${actTag(r)}</td><td>${deptTag(r.department, r.department_label)}</td>
+          ${d.matches.map(r => `<tr><td data-wide>${codeBtn(r.barcode)}${r.info ? `<span class="sub">${partInfo(r.info, true)}</span>` : ''}</td><td>${actTag(r)}</td><td>${deptTag(r.department, r.department_label)}</td>
             <td>${r.position ? `pozice <b>${esc(r.position)}</b>` : r.quantity != null ? `<b>${num(r.quantity)} ks</b>` : '<span class="muted">—</span>'}</td><td class="nowrap">${esc(when(r.recorded_at))}</td></tr>`).join('')}
           </tbody></table></div>${d.more ? '<p class="hint mt-10">Zobrazeno prvních 50. Zpřesni hledání.</p>' : ''}</section>`;
       }
@@ -1171,7 +1202,7 @@
       ua.innerHTML = urgentAll.length ? `<div class="card-head"><div><h2>⚡ Urgentní průvodky</h2><p class="hint mt-4">Z tabulek s urgenty. Na pracovišti svítí, dokud je odtamtud neexportují.</p></div><span class="tag crit">${num(urgentAll.length)}</span></div>
         <div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>Barcode</th><th>Kde je</th><th>Pozice</th><th>Od</th><th>Poznámka</th></tr></thead><tbody>
         ${uRows.map(u => { const l = u.last; const there = l && l.action === 'prijem';
-          return `<tr class="${there ? 'u-there' : ''}"><td data-wide>${codeBtn(u.barcode)}${u.of ? `<span class="sub">poddíl sestavy ${esc(u.of)}</span>` : ''}</td>
+          return `<tr class="${there || u.onsite ? 'u-there' : ''}"><td data-wide>${codeBtn(u.barcode)}${u.family ? `<span class="sub" title="Urgentní jsou i poddíly">sestava ${esc(u.mask || '')}</span>` : ''}${assemblyParts(u.parts, null)}</td>
             <td>${l ? (there ? `${deptTag(l.department, l.department_label)}` : `<span class="muted">odešla z ${esc(l.department_label)}</span>`) : '<span class="muted">zatím nikde</span>'}</td>
             <td>${there && l.position ? `<b>${esc(l.position)}</b>` : '<span class="muted">—</span>'}</td>
             <td class="nowrap">${l ? esc(agoUnix(l.recorded_at_unix)) : '—'}</td><td>${u.note ? esc(u.note) : '<span class="muted">—</span>'}</td></tr>`; }).join('')}
@@ -1182,7 +1213,7 @@
         return `<section class="card onsite-card dept-${d.code}"><div class="card-head"><div><p class="eyebrow">${deptDot(d.code)}${esc(d.name)}</p><div class="big-n">${num(d.total)}${uN ? ` <span class="tag crit">⚡ ${num(uN)} ${SC.plural(uN, 'urgent', 'urgenty', 'urgentů')}</span>` : ''}</div>
             <p class="small muted">${SC.plural(d.total, 'průvodka', 'průvodky', 'průvodek')} na pracovišti</p></div></div>
           ${rows.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Barcode</th><th>Pozice</th><th>Od</th></tr></thead><tbody>
-            ${rows.map(r => `<tr class="${isUrgent(r.barcode) ? 'u-there' : ''}"><td>${codeBtn(r.barcode)}${isUrgent(r.barcode) ? ' <span class="tag crit">⚡ urgent</span>' : ''}<span class="sub">${esc(r.user)}</span></td><td>${r.position ? `<b>${esc(r.position)}</b>` : '<span class="muted">—</span>'}</td>
+            ${rows.map(r => `<tr class="${isUrgent(r.barcode) ? 'u-there' : ''}"><td>${codeBtn(r.barcode)}${isUrgent(r.barcode) ? ' <span class="tag crit">⚡ urgent</span>' : ''}<span class="sub">${esc(r.user)}</span>${r.info ? `<span class="sub">${partInfo(r.info, true)}</span>` : ''}</td><td>${r.position ? `<b>${esc(r.position)}</b>` : '<span class="muted">—</span>'}</td>
               <td class="nowrap" title="${esc(when(r.recorded_at))}">${esc(agoUnix(r.recorded_at_unix))}</td></tr>`).join('')}</tbody></table></div>`
             : `<p class="empty">${q ? 'Nic neodpovídá filtru.' : 'Žádná průvodka.'}</p>`}
           ${d.total > d.records.length ? `<p class="hint">Zobrazeno ${num(d.records.length)} nejnovějších z ${num(d.total)}.</p>` : ''}</section>`;
@@ -1398,7 +1429,7 @@
       },
     };
     const pre = (text) => `<div class="pre"><pre>${esc(text)}</pre><button class="btn small copy" type="button" data-copy>Kopírovat</button></div>`;
-    const gs = Object.assign({ list: 'List 1', col: 'D', link: true, param: 'activeBarcode', out: 'K', row: 2, kind: 'stav', note: '', family: true }, store.get('gsheet', {}));
+    const gs = Object.assign({ list: 'List 1', col: 'D', link: true, param: 'activeBarcode', out: 'K', row: 2, kind: 'stav', note: '', family: true, iOrder: '', iAsm: '', iIndex: '', iEan: true }, store.get('gsheet', {}));
     view.innerHTML = `<div class="stack-18"><section class="card sheets" id="gsheet">
       <div class="card-head"><div><p class="eyebrow">Novinka ve verzi 1.4: víc tabulek a urgenty</p><h1>Google tabulka: živé propojení</h1>
         <p class="hint mt-4">Tabulka řekne Evidenci, které průvodky sleduje, a Evidence do ní sama zapíše každý příjem, export i storno. Do pár sekund, bez obnovování. Tabulka s urgenty navíc rozsvítí pracovníkům upozornění. Tabulek jde připojit víc, každá svým skriptem.</p></div></div>
@@ -1422,6 +1453,12 @@
           <input class="input mono" name="param" maxlength="40" value="${esc(gs.param)}" aria-label="Parametr odkazu"></div>
         <div class="field gs-note" data-gs="famField"><label class="check"><input type="checkbox" name="family"${gs.family !== false ? ' checked' : ''}> Urgentní jsou i poddíly sestavy</label>
           <small class="hint">Poddíl se liší jen posledním dvojčíslím ve 2. a 3. části: k sestavě <span class="mono">12345.678901.23456</span> patří i <span class="mono">12345.6789<b>xx</b>.234<b>xx</b></span>.</small></div>
+        <fieldset class="gs-info"><legend>Údaje k průvodce <span class="muted">(nepovinné; Evidence je ukáže u průvodky i s odkazem z buňky s barcodem)</span></legend>
+          <label class="field"><span>Číslo objednávky</span><input class="input mono" name="iOrder" maxlength="3" value="${esc(gs.iOrder)}" placeholder="sloupec"></label>
+          <label class="field"><span>EAN sestavy</span><input class="input mono" name="iAsm" maxlength="3" value="${esc(gs.iAsm)}" placeholder="sloupec"></label>
+          <label class="field"><span>Index</span><input class="input mono" name="iIndex" maxlength="3" value="${esc(gs.iIndex)}" placeholder="sloupec"></label>
+          <label class="check gs-ean"><input type="checkbox" name="iEan"${gs.iEan !== false ? ' checked' : ''}> Text buňky s odkazem je EAN</label>
+        </fieldset>
         <label class="field gs-note" data-gs="noteField"><span>Sloupec s poznámkou k urgentu <span class="muted">(nepovinné, třeba termín nebo zákazník; uvidí ji pracovníci)</span></span><input class="input mono" name="note" maxlength="3" value="${esc(gs.note)}"></label>
       </form>
       <p class="gs-err" role="alert" hidden></p>
@@ -1491,6 +1528,7 @@
         list: f.list.value.trim(), col: f.col.value.trim().toUpperCase(), out: f.out.value.trim().toUpperCase(),
         row: Math.trunc(+f.row.value), link: f.link.checked, param: f.param.value.trim(),
         kind: $('[name=kind]:checked', form).value, note: f.note.value.trim().toUpperCase(), family: f.family.checked,
+        iOrder: f.iOrder.value.trim().toUpperCase(), iAsm: f.iAsm.value.trim().toUpperCase(), iIndex: f.iIndex.value.trim().toUpperCase(), iEan: f.iEan.checked,
       };
     }
     function problem(c) {
@@ -1498,6 +1536,8 @@
       const urgent = c.kind === 'urgent';
       if (!colOk(c.col) || (c.out && !colOk(c.out)) || (urgent && c.note && !colOk(c.note))) return 'Sloupec zadej písmenem, např. D nebo AB.';
       if (!urgent && !c.out) return 'Vyplň, do kterého sloupce se zapíše poslední záznam.';
+      if ([c.iOrder, c.iAsm, c.iIndex].some(x => x && !colOk(x))) return 'Sloupce s údaji k průvodce zadej písmenem (nebo nech prázdné).';
+      if ([c.iOrder, c.iAsm, c.iIndex].some(x => x && (x === c.out || x === c.col))) return 'Údaje k průvodce musí být v jiném sloupci než barcode a výsledek.';
       if (c.col === c.out) return 'Výsledek musí jít do jiného sloupce, než je barcode.';
       if (urgent && c.note && (c.note === c.col || c.note === c.out)) return 'Poznámka musí být v jiném sloupci než barcode a výsledek.';
       if (!(c.row >= 1 && c.row <= 1000)) return 'První řádek s daty: číslo od 1 do 1000.';
@@ -1541,6 +1581,10 @@
         `  typ: ${q(urgent ? 'urgent' : 'stav')},`.padEnd(52) + (urgent ? ' // průvodky v tabulce jsou urgentní' : ' // stav průvodek'),
         `  sloupecPoznamka: ${q(urgent ? c.note : '')},`.padEnd(52) + (urgent && c.note ? ' // poznámka k urgentu (uvidí ji pracovníci)' : ' // bez poznámky'),
         `  podDily: ${urgent && c.family ? 'true' : 'false'},`.padEnd(52) + (urgent && c.family ? ' // urgentní jsou i poddíly sestavy (…xx.…xx)' : ' // jen přesná shoda'),
+        `  sloupecObjednavka: ${q(c.iOrder)},`.padEnd(52) + ' // údaje k průvodce: číslo objednávky',
+        `  sloupecEanSestavy: ${q(c.iAsm)},`.padEnd(52) + ' // EAN sestavy',
+        `  sloupecIndex: ${q(c.iIndex)},`.padEnd(52) + ' // index',
+        `  textJeEan: ${c.iEan ? 'true' : 'false'},`.padEnd(52) + (c.iEan ? ' // text buňky s odkazem je EAN' : ' // text buňky s odkazem se neposílá'),
         '};', '// </nastaveni>'].join('\n');
       script = template.replace(/\/\/ <nastaveni>[\s\S]*?\/\/ <\/nastaveni>/, block);
       $('#gsCode', view).textContent = script;

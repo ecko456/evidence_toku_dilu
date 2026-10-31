@@ -64,7 +64,8 @@ const setState = fn => { const s = load(STATE); fn(s); save(STATE, s); };
   const template = fs.readFileSync(path.join(APP, 'static/google-tabulka.js'), 'utf8');
   assert(/\/\/ <nastaveni>[\s\S]*\/\/ <\/nastaveni>/.test(template), 'šablona má blok nastavení');
   fs.writeFileSync(SCRIPT, template.replace(/\/\/ <nastaveni>[\s\S]*\/\/ <\/nastaveni>/, `// <nastaveni>
-const ETD = { api: '${BASE}/api/v1/', list: 'List1', sloupecBarcode: 'D', parametrOdkazu: 'activeBarcode', sloupecVysledek: 'K', prvniRadek: 2 };
+const ETD = { api: '${BASE}/api/v1/', list: 'List1', sloupecBarcode: 'D', parametrOdkazu: 'activeBarcode', sloupecVysledek: 'K', prvniRadek: 2,
+  sloupecObjednavka: 'A', sloupecEanSestavy: 'B', sloupecIndex: 'C', textJeEan: true };
 // </nastaveni>`));
 
   const link = code => `http://is.example/commission.production.detail/default/10001?activeBarcode=${code}&componentProductionId=678901`;
@@ -74,7 +75,8 @@ const ETD = { api: '${BASE}/api/v1/', list: 'List1', sloupecBarcode: 'D', parame
       Poznámky: { A1: { v: 'jiný list' } },
       'List 1': {   // česká tabulka: s mezerou; ve skriptu je 'List1', najde se i tak
         D1: { v: 'Odkaz' }, K1: { v: 'Evidence' },
-        D2: { v: 'Zakázka 1', link: link('12345.678901.23456') },                 // odkaz vložený přes Ctrl+K
+        A2: { v: 'OBJ-2026-001' }, B2: { v: '8590000000024' }, C2: { v: '03' },     // údaje k průvodce (objednávka, EAN sestavy, index)
+        D2: { v: '8590000000017', link: link('12345.678901.23456') },             // odkaz vložený přes Ctrl+K, text = EAN
         D3: { f: `=HYPERLINK("${link('12345.678901.23457')}";"Zakázka 2")`, computed: 'Zakázka 2' },
         D4: { v: 'bez odkazu' }, K4: { f: '=1+1', computed: 2 },                  // vlastní vzorec zůstane
         D5: { v: 'Zakázka 5', runs: [null, link('NOVA.1')] },                     // odkaz jen v části textu
@@ -124,6 +126,10 @@ const ETD = { api: '${BASE}/api/v1/', list: 'List1', sloupecBarcode: 'D', parame
   assert.strictEqual(sheetK(5).v, '', 'NOVA.1 zatím v evidenci není');
   assert.strictEqual(sheetK(6).v, sheetK(2).v, 'stejná průvodka ve dvou řádcích');
   assert.strictEqual(sheetK(4).f, '=1+1', 'řádek bez odkazu (i se vzorcem) zůstal');
+  // údaje z tabulky Stav průvodek: v aplikaci u průvodky i s odkazem do IS
+  const li = (await page('last&barcode=12345.678901.23456')).info;
+  assert.deepStrictEqual(li, { order: 'OBJ-2026-001', ean: '8590000000017', eanAssembly: '8590000000024', index: '03', link: link('12345.678901.23456') });
+  assert.deepStrictEqual((await page('last&barcode=12345.678901.23457')).info, { ean: 'Zakázka 2', link: link('12345.678901.23457') }, 'odkaz i ze vzorce HYPERLINK, bez sloupců údajů jen EAN a odkaz');
   assert.deepStrictEqual(load(STATE).triggers.map(t => t.fn + ':' + t.kind).sort(), ['etdHodinova:hours:1', 'etdPriUprave:edit']);
 
   // 3) živá změna: export průvodky z jiného oddělení → úloha → doPost → K

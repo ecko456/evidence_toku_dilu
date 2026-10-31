@@ -784,7 +784,7 @@ class SheetsV14Tests(Base):
         self.assertEqual([(u["barcode"], u["note"], u["last"]["position"]) for u in data["here"]], [("u-1", "expres", "R3")])
         self.assertEqual(data["counts"], {"hala": 1})
         status, onsite = worker.get("onsite")
-        self.assertEqual((sorted(onsite["urgent"]), onsite["urgentCounts"]), (["u-1", "u-2"], {"hala": 1}))
+        self.assertEqual((sorted(onsite["urgent"]), onsite["urgentCounts"]), (["u-1"], {"hala": 1}))
         status, found = worker.get("search", q="U-1")
         self.assertEqual(found["exact"]["urgent"], "expres")
         # na jiném pracovišti nesvítí; Visitor nemá pracoviště
@@ -825,13 +825,63 @@ class SheetsV14Tests(Base):
         self.assertEqual(data["counts"], {"hala": 2})
         status, found = worker.get("search", q="12345.678902.23411")
         self.assertEqual((found["exact"]["urgent"], found["exact"]["urgentOf"]), ("sestava", "12345.678901.23456"))
+        # sestava i s díly (rozbalovací seznam): vlastní stav a stav každého poddílu
+        here = {u["barcode"]: u for u in data["here"]}
+        self.assertEqual([p["barcode"] for p in here["12345.678902.23411"]["parts"]], ["12345.678901.23456", "12345.678902.23411"])
+        worker.scan("export", [{"barcode": "12345.678901.23456", "qty": 1}])
+        worker.scan("prijem", [{"barcode": "12345.678903.23412"}])
         status, data = worker.get("urgent", all="1")
-        self.assertEqual(sorted(u["barcode"] for u in data["all"]), ["12345.678901.23456", "12345.678902.23411", "55555.111111.22222"])
+        overview = {u["barcode"]: u for u in data["all"]}
+        self.assertEqual(sorted(overview), ["12345.678901.23456", "55555.111111.22222"], "poddíly jsou v řádku sestavy, ne zvlášť")
+        asm = overview["12345.678901.23456"]
+        self.assertEqual((asm["last"]["action"], asm["family"], asm["mask"], asm["onsite"]), ("export", True, "12345.6789xx.234xx", 2))
+        self.assertEqual([(p["barcode"], p["last"]["action"], p["last"]["position"]) for p in asm["parts"]],
+                         [("12345.678902.23411", "prijem", "P1"), ("12345.678903.23412", "prijem", None)])
+        self.assertEqual(overview["55555.111111.22222"]["parts"], [], "tabulka bez poddílů")
+        self.assertEqual([u["barcode"] for u in data["all"]][0], "12345.678901.23456", "nahoře urgenty, které (nebo jejich díl) leží na pracovišti")
         # export poddílu: zhasne jen on
         worker.scan("export", [{"barcode": "12345.678902.23411", "qty": 1}])
-        self.assertEqual([u["barcode"] for u in worker.get("urgent")[1]["here"]], ["12345.678901.23456"])
+        self.assertEqual([u["barcode"] for u in worker.get("urgent")[1]["here"]], ["12345.678903.23412"])
         status, hooks = self.admin.get("hooks")
         self.assertEqual(sorted((h["ref"], h["family"]) for h in hooks["hooks"]), [("u", True), ("v", False)])
+
+    def test_part_info_from_status_sheet(self):
+        link = "https://is.example/detail/1?activeBarcode=I-1&x=2"
+        status, data = self.watch(self.body(ref="s", barcodes=["I-1", "I-2", "I-3"], info={
+            "I-1": {"order": "OBJ-1", "ean": "8590000000017", "eanAssembly": "8590000000024", "index": "03", "link": link, "nic": "x"},
+            "i-2": {"link": "javascript:alert(1)", "order": "  OBJ-2  "},
+            "I-3": {"link": "https://is.example/a b\"><script>"},
+        }))
+        self.assertEqual(status, 200, data)
+        self.admin.dept("hala")
+        status, data = self.admin.scan("prijem", [{"barcode": "i-1"}, {"barcode": "I-2"}, {"barcode": "I-3"}, {"barcode": "JINA"}])
+        self.assertEqual([r.get("info") for r in data["results"]], [
+            {"order": "OBJ-1", "ean": "8590000000017", "eanAssembly": "8590000000024", "index": "03", "link": link},
+            {"order": "OBJ-2"},          # odkaz javascript: se neuloží
+            None,                        # neplatný odkaz a nic dalšího
+            None,
+        ])
+        status, last = self.admin.get("last", barcode="I-1")
+        self.assertEqual(last["info"]["order"], "OBJ-1")
+        status, found = self.admin.get("search", q="I-1")
+        self.assertEqual(found["exact"]["info"]["link"], link)
+        status, found = self.admin.get("search", q="I-")
+        self.assertEqual({m["barcode"]: (m["info"] or {}).get("order") for m in found["matches"]}, {"i-1": "OBJ-1", "I-2": "OBJ-2", "I-3": None})
+        status, onsite = self.admin.get("onsite")
+        hala = next(d for d in onsite["depts"] if d["code"] == "hala")
+        self.assertEqual(sorted((r["barcode"], (r["info"] or {}).get("index")) for r in hala["records"]), [("I-2", None), ("I-3", None), ("JINA", None), ("i-1", "03")])
+        status, data = self.watch(self.body(ref="s", info=["seznam"]))
+        self.assertEqual(status, 400)
+        # odpojená tabulka: údaje zmizí
+        self.watch(method="DELETE", query="?ref=s")
+        self.assertIsNone(self.admin.get("last", barcode="I-1")[1]["info"])
+
+    def test_big_list_with_info(self):
+        codes = [f"12345.{100000 + i}.{20000 + i}" for i in range(10000)]
+        info = {c: {"order": f"OBJ-{i}", "ean": f"859{i:010d}", "eanAssembly": f"858{i:010d}", "index": "01",
+                    "link": f"https://is.example/commission.production.detail/default/{i}?activeBarcode={c}&componentProductionId={i}"} for i, c in enumerate(codes)}
+        status, data = self.watch(self.body(ref="velka", barcodes=codes, info=info))
+        self.assertEqual((status, data.get("watching")), (200, 10000), str(data)[:200])
 
     def test_upgrade_from_schema_3_keeps_sheet(self):
         self.server.stop()
@@ -851,7 +901,7 @@ class SheetsV14Tests(Base):
         h = hooks["hooks"][0]
         self.assertEqual((h["id"], h["watching"], h["queued"], h["sent"], h["kind"], h["name"]), (7, 2, 1, 5, "status", ""))
         with self.server.db() as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM hook_watch").fetchone()[0], 2)
             self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
         # skript 1.3 (bez ref) dál aktualizuje stejné propojení, nevznikne druhé
@@ -871,7 +921,7 @@ class DataTests(Base):
         self.admin.scan("prijem", [{"barcode": f"B-{i}"} for i in range(30)], position="A1", define=True)
         self.admin.scan("export", [{"barcode": "B-1", "qty": 2}])
         with self.server.db() as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
             parts_before = sorted(db.execute("SELECT barcode, last_id, last_action, last_dept FROM parts").fetchall())
         backups = self.server.data / "zalohy"
         out = self.server.cli("bin/backup-db.php", str(backups))
@@ -1102,11 +1152,12 @@ class UpgradeTests(unittest.TestCase):
             status, data_ = client.post("user_save", {"login": "novak", "name": "Novák", "role": "operator", "depts": ["hala"], "passwordMode": "self", "active": True})
             self.assertEqual(status, 200, data_)
             with server.db() as db:
-                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
                 self.assertIn("pending_until", [r[1] for r in db.execute("PRAGMA table_info(users)")])
                 tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
                 self.assertTrue({"hooks", "hook_watch", "hook_queue", "meta"} <= tables, "schéma 3 (živé propojení)")
                 self.assertIn("kind", [r[1] for r in db.execute("PRAGMA table_info(hooks)")], "schéma 4 (víc tabulek, urgenty)")
+                self.assertIn("info", [r[1] for r in db.execute("PRAGMA table_info(hook_watch)")], "schéma 5 (údaje k průvodce)")
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM records").fetchone()[0], 2)
         finally:
             server.stop()

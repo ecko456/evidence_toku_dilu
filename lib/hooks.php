@@ -123,13 +123,63 @@ function etd_hook_requeue_all(int $hookId): int
 
 const ETD_HOOK_KINDS = ['status' => 'Stav průvodek', 'urgent' => 'Urgenty'];
 const ETD_MAX_HOOKS_PER_KEY = 20;
+const ETD_WATCH_MAX_BYTES = 12 * 1048576;   // seznam z tabulky i s údaji k průvodkám (10 000 řádků)
+/** Údaje k průvodce, které tabulka může poslat (klíč => [popis, nejvýš znaků]). */
+const ETD_INFO_FIELDS = ['order' => ['Číslo objednávky', 80], 'ean' => ['EAN', 80], 'eanAssembly' => ['EAN sestavy', 80], 'index' => ['Index', 40]];
+
+/** Údaje k průvodce z tabulky: jen známá pole jako text a odkaz jen http(s). Prázdné = null. */
+function etd_info_clean(mixed $info): ?array
+{
+    if (!is_array($info)) {
+        return null;
+    }
+    $out = [];
+    foreach (ETD_INFO_FIELDS as $field => [, $max]) {
+        $v = etd_text($info[$field] ?? '', $max);
+        if ($v !== '') {
+            $out[$field] = $v;
+        }
+    }
+    $link = trim(is_string($info['link'] ?? null) ? $info['link'] : '');
+    if ($link !== '' && strlen($link) <= 1000 && preg_match('#^https?://[^\s<>"\'`]+$#i', $link) && filter_var($link, FILTER_VALIDATE_URL)) {
+        $out['link'] = $link;
+    }
+    return $out === [] ? null : $out;
+}
+
+/** Údaje ze všech aktivních tabulek (barcode malými => údaje; první neprázdná hodnota pole vyhrává). */
+function etd_info_index(): array
+{
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+    $cache = [];
+    $rows = etd_all("SELECT w.barcode, w.info FROM hook_watch w JOIN hooks h ON h.id = w.hook_id AND h.active = 1
+        JOIN api_keys k ON k.id = h.api_key_id AND k.revoked_at IS NULL WHERE w.info IS NOT NULL ORDER BY h.kind = 'urgent', h.id");
+    foreach ($rows as $row) {
+        $info = json_decode((string)$row['info'], true);
+        if (is_array($info)) {
+            $key = mb_strtolower((string)$row['barcode']);
+            $cache[$key] = ($cache[$key] ?? []) + $info;
+        }
+    }
+    return $cache;
+}
+
+/** Údaje k průvodce z tabulek (číslo objednávky, EAN, …, odkaz), nebo null. */
+function etd_part_info(string $barcode): ?array
+{
+    return etd_info_index()[mb_strtolower($barcode)] ?? null;
+}
 
 /**
  * Seznam sledovaných barcodů z tabulky (API watch). Nahradí předchozí seznam téhle tabulky.
  * Tabulku pozná podle klíče a ref (ID tabulky a listu v Googlu); bez ref = jedna na klíč (skript 1.3).
  *
  * @param array $opts ['kind' => status|urgent, 'name' => název pro Správu, 'ref' => …, 'notes' => [barcode => poznámka],
- *                     'family' => u urgentů hledat i poddíly sestavy (etd_family)]
+ *                     'family' => u urgentů hledat i poddíly sestavy (etd_family),
+ *                     'info' => [barcode => údaje k průvodce (etd_info_clean)]]
  * @return array ['hook' => řádek hooks, 'watching' => počet, 'skipped' => neplatné, 'codes' => barcody, 'created' => nové?]
  */
 function etd_hook_register(array $key, string $url, string $secret, array $barcodes, array $opts = []): array
@@ -138,6 +188,12 @@ function etd_hook_register(array $key, string $url, string $secret, array $barco
     $name = etd_text($opts['name'] ?? '', 120);
     $ref = etd_text($opts['ref'] ?? '', 200);
     $family = $kind === 'urgent' && !empty($opts['family']) ? 1 : 0;
+    $infos = [];
+    foreach ((array)($opts['info'] ?? []) as $code => $info) {
+        if (($clean = etd_info_clean($info)) !== null) {
+            $infos[mb_strtolower((string)$code)] = json_encode($clean, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+    }
     $notes = [];
     foreach ((array)($opts['notes'] ?? []) as $code => $note) {
         $note = etd_text($note, 200);
@@ -155,7 +211,7 @@ function etd_hook_register(array $key, string $url, string $secret, array $barco
         }
         $codes[mb_strtolower($code)] ??= $code;
     }
-    return etd_tx(static function () use ($key, $url, $secret, $codes, $skipped, $kind, $name, $ref, $notes, $family): array {
+    return etd_tx(static function () use ($key, $url, $secret, $codes, $skipped, $kind, $name, $ref, $notes, $family, $infos): array {
         $now = time();
         $hook = etd_one('SELECT * FROM hooks WHERE api_key_id = ? AND ref = ?', [(int)$key['id'], $ref]);
         $created = $hook === null;
@@ -175,11 +231,12 @@ function etd_hook_register(array $key, string $url, string $secret, array $barco
                 [$url, $secret, $kind, $name, $name, $now, (int)$changed, (int)$changed, $hookId]);
         }
         etd_exec('DELETE FROM hook_watch WHERE hook_id = ?', [$hookId]);
-        $insert = etd_db()->prepare('INSERT INTO hook_watch (hook_id, barcode, note) VALUES (?, ?, ?)');
+        $insert = etd_db()->prepare('INSERT INTO hook_watch (hook_id, barcode, note, info) VALUES (?, ?, ?, ?)');
         foreach ($codes as $lower => $code) {
             $insert->bindValue(1, $hookId, PDO::PARAM_INT);
             $insert->bindValue(2, $code, PDO::PARAM_STR);
             $insert->bindValue(3, $notes[$lower] ?? null, isset($notes[$lower]) ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            $insert->bindValue(4, $infos[$lower] ?? null, isset($infos[$lower]) ? PDO::PARAM_STR : PDO::PARAM_NULL);
             $insert->execute();
         }
         // ve frontě zůstane jen to, co tabulka pořád sleduje
@@ -249,7 +306,8 @@ function etd_urgent_index(): array
     $exact = [];
     $family = [];
     foreach ($rows as $row) {
-        $u = ['barcode' => (string)$row['barcode'], 'note' => $row['note'] === null ? '' : (string)$row['note'], 'sheets' => (string)$row['sheets']];
+        $u = ['barcode' => (string)$row['barcode'], 'note' => $row['note'] === null ? '' : (string)$row['note'], 'sheets' => (string)$row['sheets'],
+            'family' => (int)$row['fam'] === 1 && etd_family((string)$row['barcode']) !== null];
         $exact[mb_strtolower($u['barcode'])] = $u;
         if ((int)$row['fam'] && ($f = etd_family($u['barcode'])) !== null) {
             $family[$f] ??= $u;
@@ -285,9 +343,34 @@ function etd_urgent_note(string $barcode): ?string
 }
 
 /**
- * Urgentní průvodky. $dept = jen ty, které teď leží na pracovišti (poslední záznam je příjem tam):
- * svítí, dokud z pracoviště neodejdou exportem. Bez $dept všechny: urgenty z tabulek (i ty, které
- * ještě nikde nebyly) a poddíly, které leží na některém pracovišti.
+ * Všechny díly sestavy, které už mají záznam (sestava i poddíly: stejná „rodina“, viz etd_family),
+ * každý s posledním platným záznamem. Hledá se přes LIKE s _ na místě posledních dvojčíslí (index).
+ */
+function etd_family_parts(string $barcode): array
+{
+    static $cache = [];
+    $family = etd_family($barcode);
+    if ($family === null) {
+        return [];
+    }
+    if (isset($cache[$family])) {
+        return $cache[$family];
+    }
+    [$a, $b, $c] = explode('.', $family);
+    $rows = etd_all("SELECT r.* FROM parts p JOIN records r ON r.id = p.last_id WHERE p.barcode LIKE ? ORDER BY p.barcode LIMIT 300", ["{$a}.{$b}__.{$c}__"]);
+    $out = [];
+    foreach ($rows as $r) {
+        if (etd_family((string)$r['barcode']) === $family) {
+            $out[] = ['barcode' => (string)$r['barcode'], 'last' => etd_record_public($r)];
+        }
+    }
+    return $cache[$family] = $out;
+}
+
+/**
+ * Urgentní průvodky, které teď leží na pracovišti (poslední záznam je příjem tam; bez $dept na
+ * kterémkoli): svítí, dokud z pracoviště neodejdou exportem. U sestavy s poddíly i „parts“ =
+ * všechny díly sestavy se stavem (rozbalovací seznam v aplikaci).
  */
 function etd_urgent_list(?string $dept = null): array
 {
@@ -295,32 +378,46 @@ function etd_urgent_list(?string $dept = null): array
     if ($idx['exact'] === []) {
         return [];
     }
-    $item = static fn(array $u, ?array $r, ?array $m): array => [
-        'barcode' => $r === null ? $u['barcode'] : (string)$r['barcode'],
-        'note' => $u['note'], 'sheets' => $u['sheets'],
-        'of' => $m['of'] ?? null, 'mask' => $m['mask'] ?? null,
-        'last' => $r === null ? null : etd_record_public($r),
-    ];
     $out = [];
-    $seen = [];
     $onsite = $dept === null
         ? etd_all("SELECT r.* FROM parts p JOIN records r ON r.id = p.last_id WHERE p.last_action = 'prijem' ORDER BY r.created_at")
         : etd_all("SELECT r.* FROM parts p JOIN records r ON r.id = p.last_id WHERE p.last_dept = ? AND p.last_action = 'prijem' ORDER BY r.created_at", [$dept]);
     foreach ($onsite as $r) {
         if (($m = etd_urgent_match((string)$r['barcode'])) !== null) {
             $u = isset($m['of']) ? $idx['exact'][mb_strtolower($m['of'])] : $idx['exact'][mb_strtolower((string)$r['barcode'])];
-            $out[] = $item($u, $r, $m);
-            $seen[mb_strtolower((string)$r['barcode'])] = true;
+            $out[] = [
+                'barcode' => (string)$r['barcode'], 'note' => $u['note'], 'sheets' => $u['sheets'],
+                'of' => $m['of'] ?? null, 'mask' => $m['mask'] ?? null,
+                'last' => etd_record_public($r), 'info' => etd_part_info((string)$r['barcode']),
+                'parts' => $u['family'] ? etd_family_parts($u['barcode']) : [],
+            ];
         }
     }
-    if ($dept === null) {
-        // urgenty z tabulek, které teď na žádném pracovišti neleží (odešly exportem, nebo ještě nikde nebyly)
-        foreach ($idx['exact'] as $lower => $u) {
-            if (!isset($seen[$lower])) {
-                $out[] = $item($u, etd_last($u['barcode']), null);
-            }
-        }
+    return array_slice($out, 0, 2000);
+}
+
+/**
+ * Přehled urgentů (Na pracovištích): každý urgent z tabulek jednou, s vlastním posledním záznamem
+ * (nebo null, když ještě nikde nebyl) a u sestav s poddíly všemi díly sestavy a jejich stavem.
+ * Nahoře ty, které (nebo jejichž díl) teď leží na některém pracovišti.
+ */
+function etd_urgent_overview(): array
+{
+    $out = [];
+    foreach (etd_urgent_index()['exact'] as $u) {
+        $last = etd_last($u['barcode']);
+        $parts = $u['family'] ? array_values(array_filter(etd_family_parts($u['barcode']),
+            static fn(array $p): bool => mb_strtolower($p['barcode']) !== mb_strtolower($u['barcode']))) : [];
+        $onsite = ($last !== null && $last['action'] === 'prijem' ? 1 : 0)
+            + count(array_filter($parts, static fn(array $p): bool => $p['last']['action'] === 'prijem'));
+        $out[] = [
+            'barcode' => $last === null ? $u['barcode'] : (string)$last['barcode'], 'note' => $u['note'], 'sheets' => $u['sheets'],
+            'family' => $u['family'], 'mask' => $u['family'] ? etd_family_mask($u['barcode']) : null,
+            'last' => $last === null ? null : etd_record_public($last), 'info' => etd_part_info($u['barcode']),
+            'parts' => $parts, 'onsite' => $onsite,
+        ];
     }
+    usort($out, static fn(array $x, array $y): int => [$y['onsite'] > 0, $x['barcode']] <=> [$x['onsite'] > 0, $y['barcode']]);
     return array_slice($out, 0, 2000);
 }
 
