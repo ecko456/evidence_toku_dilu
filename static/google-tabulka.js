@@ -1,9 +1,11 @@
 /**
- * Evidence toku dílů → Google tabulka: živé propojení (verze 1.3.1)
+ * Evidence toku dílů → Google tabulka: živé propojení (verze 1.4)
  *
  * Skript najde ve sloupci s barcody (nebo s odkazy, ve kterých je barcode) průvodky, pošle jejich
  * seznam do Evidence a do výsledkového sloupce zapíše poslední záznam. Když pak někdo průvodku
  * přijme, exportuje nebo stornuje, Evidence změnu do pár sekund pošle sama (funkce doPost).
+ * Tabulka typu „urgent“: průvodky v ní jsou urgentní; když leží na pracovišti, pracovníkům tam
+ * v Evidenci svítí upozornění, dokud je z pracoviště neexportují. Tabulek jde připojit víc.
  *
  * Návod je v Evidenci: Správa → API pro IT → Google tabulka. Krátce:
  *   1. Rozšíření → Apps Script, vlož tenhle kód, ulož.
@@ -18,8 +20,11 @@ const ETD = {
   list: 'List 1',                                   // název listu (záložka dole)
   sloupecBarcode: 'D',                              // sloupec s barcodem nebo s odkazem
   parametrOdkazu: 'activeBarcode',                  // barcode je v odkazu za „activeBarcode=“; '' = barcode je přímo text buňky
-  sloupecVysledek: 'K',                             // sem se zapíše poslední záznam
+  sloupecVysledek: 'K',                             // sem se zapíše poslední záznam; '' = nic nezapisovat
   prvniRadek: 2,                                    // řádek 1 je záhlaví
+  typ: 'stav',                                      // 'stav' = stav průvodek, 'urgent' = průvodky v tabulce jsou urgentní
+  sloupecPoznamka: '',                              // u urgentů: sloupec s poznámkou (zobrazí se pracovníkům); '' = bez poznámky
+  podDily: true,                                    // u urgentů: urgentní jsou i poddíly sestavy (12345.6789xx.234xx)
 };
 // </nastaveni>
 
@@ -88,13 +93,15 @@ function etdZapnout() {
   etdSpoustece(true);
   const res = etdSync(true);
   const lines = [
-    'Sleduje se ' + res.watching + ' průvodek, v Evidenci je z nich ' + res.found + '.',
-    'Sloupec ' + ETD.sloupecVysledek + ' je aktuální.',
+    (ETD.typ === 'urgent' ? 'Urgentních průvodek: ' : 'Sleduje se ') + res.watching + (ETD.typ === 'urgent' ? '' : ' průvodek') + ', v Evidenci je z nich ' + res.found + '.',
+    ETD.typ === 'urgent' ? 'Když urgent leží na pracovišti, pracovníkům tam svítí upozornění, dokud ho neexportují.'
+      + (ETD.podDily !== false ? ' Platí i pro poddíly sestav (liší se posledním dvojčíslím ve 2. a 3. části).' : '') : '',
+    ETD.sloupecVysledek ? 'Sloupec ' + ETD.sloupecVysledek + ' je aktuální.' : '',
     '',
-  ];
+  ].filter((l, i) => l || i === 3);
   if (res.ping && res.ping.ok) {
     lines.push('Zkouška spojení Evidence → tabulka: v pořádku ✔');
-    lines.push('Každý příjem, export i storno sledované průvodky se tu objeví do pár sekund.');
+    if (ETD.sloupecVysledek) lines.push('Každý příjem, export i storno sledované průvodky se tu objeví do pár sekund.');
   } else {
     lines.push('⚠ Evidence se k tabulce nedostala: ' + (res.ping ? res.ping.error : 'bez odpovědi'));
     lines.push('Dokud se to nevyřeší, tabulka se aktualizuje jen při změně ve sloupci ' + ETD.sloupecBarcode + ' a jednou za hodinu.');
@@ -113,14 +120,14 @@ function etdAktualizovatVse() {
 function etdStav() {
   const ui = SpreadsheetApp.getUi();
   const props = etdProps();
-  const s = etdApi('get', 'watch');
+  const s = etdApi('get', 'watch?ref=' + encodeURIComponent(etdRef()));
   const lines = [];
   if (!s.connected) {
     lines.push('Živé propojení je vypnuté. Zapneš ho v menu Evidence → Zapnout živé propojení.');
   } else {
     const st = s.status;
     const label = { ok: 'v pořádku ✔', waiting: 'zapnuté, čeká na první změnu', error: 'CHYBA ⚠', off: 'vypnuté' }[st.status] || st.status;
-    lines.push('Propojení: ' + label);
+    lines.push('Propojení: ' + label + (st.kind === 'urgent' ? ' (tabulka s urgenty)' : ''));
     lines.push('Sledováno: ' + st.watching + ' průvodek · čeká na odeslání: ' + st.queued + ' · odesláno celkem: ' + st.sent);
     if (st.lastOkAt) lines.push('Naposledy doručeno: ' + etdCas(st.lastOkAt));
     if (st.lastError) lines.push('', 'Chyba (' + etdCas(st.lastErrorAt) + '): ' + st.lastError, st.retryAt ? 'Další pokus: ' + etdCas(st.retryAt) : '');
@@ -137,9 +144,10 @@ function etdStav() {
 function etdVypnout() {
   const ui = SpreadsheetApp.getUi();
   etdSpoustece(false);
-  try { etdApi('delete', 'watch'); } catch (err) { /* klíč může být zrušený; spouštěče jsou pryč tak jako tak */ }
+  try { etdApi('delete', 'watch?ref=' + encodeURIComponent(etdRef())); } catch (err) { /* klíč může být zrušený; spouštěče jsou pryč tak jako tak */ }
   etdProps().deleteProperty('ETD_SECRET');
-  ui.alert('Živé propojení je vypnuté. Sloupec ' + ETD.sloupecVysledek + ' zůstal, jak byl, a už se nemění.');
+  ui.alert('Živé propojení je vypnuté.' + (ETD.sloupecVysledek ? ' Sloupec ' + ETD.sloupecVysledek + ' zůstal, jak byl, a už se nemění.' : '')
+    + (ETD.typ === 'urgent' ? ' Průvodky z téhle tabulky už v Evidenci nejsou urgentní.' : ''));
 }
 
 /* ------------------------------------------------------------------ spouštěče */
@@ -148,8 +156,8 @@ function etdVypnout() {
 function etdPriUprave(e) {
   const r = e && e.range;
   if (!r || r.getSheet().getName() !== etdList().getName()) return;
-  const col = etdSloupec(ETD.sloupecBarcode);
-  if (r.getColumn() > col || r.getLastColumn() < col) return;
+  const cols = [ETD.sloupecBarcode, ETD.sloupecPoznamka].filter(Boolean).map(etdSloupec);
+  if (!cols.some(col => r.getColumn() <= col && r.getLastColumn() >= col)) return;
   etdSync(false);
 }
 
@@ -222,10 +230,20 @@ function etdSync(ping) {
     const unique = [];
     const seen = {};
     codes.forEach(c => { if (c && !seen[c.toLowerCase()]) { seen[c.toLowerCase()] = true; unique.push(c); } });
+    const notes = {};
+    if (ETD.sloupecPoznamka && codes.length) {
+      sheet.getRange(ETD.prvniRadek, etdSloupec(ETD.sloupecPoznamka), codes.length, 1).getDisplayValues()
+        .forEach((r, i) => { const t = String(r[0]).trim(); if (codes[i] && t && !notes[codes[i]]) notes[codes[i]] = t.slice(0, 200); });
+    }
     const res = etdApi('post', 'watch', {
       url: props.getProperty('ETD_WEBAPP'),
       secret: props.getProperty('ETD_SECRET'),
+      kind: ETD.typ === 'urgent' ? 'urgent' : 'status',
+      family: ETD.typ === 'urgent' && ETD.podDily !== false,
+      name: sheet.getParent().getName() + ' / ' + sheet.getName(),
+      ref: etdRef(),
       barcodes: unique,
+      notes: notes,
       ping: !!ping,
     });
     const mapa = {};
@@ -266,7 +284,7 @@ function etdNactiBarcody(sheet) {
  * beze změny, i se vzorci. Vrací počet změněných buněk.
  */
 function etdZapis(sheet, codes, mapa, jenZnam) {
-  if (!codes.length) return 0;
+  if (!codes.length || !ETD.sloupecVysledek) return 0;
   const range = sheet.getRange(ETD.prvniRadek, etdSloupec(ETD.sloupecVysledek), codes.length, 1);
   const values = range.getValues();
   const formulas = range.getFormulas();
@@ -327,6 +345,12 @@ function etdList() {
     throw new Error('List „' + ETD.list + '“ v tabulce není. Listy v tabulce: ' + names + '. Oprav ETD.list nahoře ve skriptu (přesně jako záložka dole) a ulož (Ctrl+S).');
   }
   return sheet;
+}
+
+/** Tahle tabulka a list v Googlu (stálé ID; přejmenování listu nevadí). Evidence podle něj rozliší víc tabulek. */
+function etdRef() {
+  const sheet = etdList();
+  return sheet.getParent().getId() + '#' + sheet.getSheetId();
 }
 
 /** 'K' → 11, 'AA' → 27 */

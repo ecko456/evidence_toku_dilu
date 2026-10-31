@@ -199,6 +199,13 @@ switch ($action) {
             etd_fail('Vyplň pozici, kam se díly umístí.');
         }
         $results = etd_scan($session, $kind, $items, $position, !empty($input['force']));
+        foreach ($results as &$r) {
+            // urgentní průvodka: při příjmu ji pracoviště uvidí v pásu urgentů, při exportu z něj zmizí
+            if ($r['status'] === 'ok' && ($m = etd_urgent_match((string)$r['barcode'])) !== null) {
+                $r['urgent'] = ['note' => $m['note']] + (isset($m['of']) ? ['of' => $m['of'], 'mask' => $m['mask']] : []);
+            }
+        }
+        unset($r);
         $written = count(array_filter($results, static fn(array $r): bool => $r['status'] === 'ok'));
         etd_json(['results' => $results, 'written' => $written]);
 
@@ -281,7 +288,8 @@ switch ($action) {
         $history = etd_all('SELECT * FROM records WHERE barcode = ? COLLATE NOCASE ORDER BY id DESC LIMIT 500', [$q]);
         if ($history) {
             $last = etd_last($q);
-            $exact = ['barcode' => $last['barcode'] ?? $history[0]['barcode'], 'last' => $last === null ? null : etd_record_public($last) + ['canCancel' => etd_can_cancel($session, $last)],
+            $um = etd_urgent_match($q);
+            $exact = ['urgent' => $um === null ? null : $um['note'], 'urgentOf' => $um['of'] ?? null, 'barcode' => $last['barcode'] ?? $history[0]['barcode'], 'last' => $last === null ? null : etd_record_public($last) + ['canCancel' => etd_can_cancel($session, $last)],
                 'history' => etd_records_for($session, $history), 'count' => (int)(etd_one('SELECT COUNT(*) AS n FROM records WHERE barcode = ? COLLATE NOCASE', [$q])['n'] ?? 0)];
         }
         $rows = etd_all("SELECT r.* FROM parts p JOIN records r ON r.id = p.last_id WHERE p.barcode LIKE ? ESCAPE '\\' AND p.barcode <> ? ORDER BY p.updated_at DESC, p.last_id DESC LIMIT 51", [etd_like($q), $q]);
@@ -296,7 +304,15 @@ switch ($action) {
             $rows = etd_all("SELECT r.* FROM parts p JOIN records r ON r.id = p.last_id WHERE p.last_dept = ? AND p.last_action = 'prijem' ORDER BY p.updated_at DESC LIMIT 500", [$code]);
             $out[] = ['code' => $code, 'name' => $name, 'total' => $total, 'records' => array_map('etd_record_public', $rows)];
         }
-        etd_json(['depts' => $out]);
+        $urgent = array_map(static fn(array $u): string => mb_strtolower($u['barcode']), etd_urgent_list());
+        etd_json(['depts' => $out, 'urgent' => $urgent, 'urgentCounts' => (object)etd_urgent_counts()]);
+
+    case 'urgent':
+        // urgentní průvodky: na pracovišti přihlášeného (svítí, dokud neodejdou exportem) a všechny
+        $session = etd_require_session();
+        $dept = (string)$session['dept'];
+        $here = isset(ETD_DEPTS[$dept]) ? etd_urgent_list($dept) : [];
+        etd_json(['dept' => $dept, 'here' => $here, 'all' => isset($_GET['all']) ? etd_urgent_list() : null, 'counts' => (object)etd_urgent_counts()]);
 
     case 'positions':
         // pozice použité na pracovišti za posledních 90 dní (návrhy do pole Pozice)
@@ -461,7 +477,8 @@ switch ($action) {
         }
         if ($action === 'hook_delete') {
             etd_exec('DELETE FROM hooks WHERE id = ?', [(int)$hook['id']]);
-            etd_log((string)$admin['name'], "Odpojena Google tabulka (klíč „{$hook['key_name']}“). Tabulka se znovu připojí, až v ní někdo zapne živé propojení.");
+            $label = $hook['name'] !== '' ? "„{$hook['name']}“" : 'Google tabulka';
+            etd_log((string)$admin['name'], "Odpojena tabulka {$label} (klíč „{$hook['key_name']}“). Znovu se připojí, až v ní někdo zapne živé propojení.");
             etd_json(['ok' => true]);
         }
         if ($action === 'hook_ping') {

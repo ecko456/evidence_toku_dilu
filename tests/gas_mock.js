@@ -52,6 +52,7 @@ function makeEnv(stateFile, scriptCode) {
   function sheet(name) {
     return {
       getName: () => name,
+      getSheetId: () => Object.keys(st().sheets).indexOf(name) + 100,
       getParent: () => spreadsheet(),
       getLastRow: () => Math.max(0, ...Object.keys(st().sheets[name] || {}).map(k => +k.replace(/^[A-Z]+/, ''))),
       getRange: (row, col, rows) => range(name, row, col, rows || 1),
@@ -60,8 +61,8 @@ function makeEnv(stateFile, scriptCode) {
 
   function spreadsheet() {
     return {
-      getId: () => 'tabulka-1',
-      getName: () => 'Kooperace',
+      getId: () => st().spreadsheetId || 'tabulka-1',
+      getName: () => st().spreadsheetName || 'Kooperace',
       getSheetByName: n => (st().sheets[n] ? sheet(n) : null),
       getSheets: () => Object.keys(st().sheets).map(sheet),
       toast: (text) => upd(s => { (s.toasts = s.toasts || []).push(text); }),

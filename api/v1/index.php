@@ -9,7 +9,8 @@ declare(strict_types=1);
  *   GET  api/v1/history?barcode=…     všechny platné záznamy průvodky od nejnovějšího
  *   GET  api/v1/ping                  ověření klíče
  *   POST api/v1/watch                 živé propojení s Google tabulkou: seznam sledovaných barcodů (od 1.3)
- *   GET  api/v1/watch                 stav propojení;  DELETE api/v1/watch  vypnutí
+ *   GET  api/v1/watch[?ref=…]         stav propojení;  DELETE api/v1/watch[?ref=…]  odpojení (od 1.4 víc tabulek
+ *                                     na klíč, rozlišené „ref“; typ „urgent“ = tabulka s urgenty)
  *
  * Klíč: hlavička Authorization: Bearer etd_… (nebo X-Api-Key). Klíče zakládá správce v aplikaci.
  * Na Apachi sem cesty api/v1/<endpoint> posílá FallbackResource (deploy/apache-evidence_toku_dilu.conf),
@@ -111,14 +112,19 @@ switch ($endpoint) {
         etd_json(['barcode' => $rows[0]['barcode'], 'found' => true, 'count' => count($rows), 'records' => array_map('etd_record_public', $rows)]);
 
     case 'watch':
+        // tabulka = klíč + ref (ID tabulky a listu, posílá skript od 1.4); bez ref jedna na klíč jako v 1.3
+        $ref = isset($_GET['ref']) ? etd_text($_GET['ref'], 200) : null;
         if ($method === 'GET' || $method === 'HEAD') {
-            $hook = etd_one('SELECT * FROM hooks WHERE api_key_id = ?', [(int)$key['id']]);
+            $hooks = etd_all('SELECT * FROM hooks WHERE api_key_id = ?' . ($ref !== null ? ' AND ref = ?' : '') . ' ORDER BY id',
+                $ref !== null ? [(int)$key['id'], $ref] : [(int)$key['id']]);
             $seen = etd_worker_seen();
-            etd_json(['connected' => $hook !== null, 'status' => $hook === null ? null : etd_hook_public($hook),
+            etd_json(['connected' => $hooks !== [], 'status' => $hooks === [] ? null : etd_hook_public($hooks[0]),
+                'sheets' => array_map(static fn(array $h): array => etd_hook_public($h), $hooks),
                 'worker' => ['running' => $seen !== null && $seen >= time() - 150, 'seenAt' => etd_iso($seen)]]);
         }
         if ($method === 'DELETE') {
-            etd_json(['ok' => true, 'removed' => etd_hook_unregister($key, 'API: ' . $key['name'])]);
+            $removed = etd_hook_unregister($key, 'API: ' . $key['name'], $ref);
+            etd_json(['ok' => true, 'removed' => $removed > 0, 'count' => $removed]);
         }
         if ($method !== 'POST') {
             etd_api_error('method_not_allowed', 'Použij GET (stav), POST (seznam barcodů) nebo DELETE (vypnutí).', 405);
@@ -139,7 +145,16 @@ switch ($endpoint) {
         if (!is_array($codes) || !array_is_list($codes) || count($codes) > ETD_MAX_WATCH) {
             etd_api_error('bad_request', 'Pošli seznam "barcodes" (nejvýš ' . ETD_MAX_WATCH . ' průvodek).', 400);
         }
-        $reg = etd_hook_register($key, $url, $secret, $codes);
+        $notes = $input['notes'] ?? [];
+        if (!is_array($notes) || ($notes !== [] && array_is_list($notes))) {
+            etd_api_error('bad_request', '"notes" musí být objekt {"barcode": "poznámka"}.', 400);
+        }
+        $kind = (string)($input['kind'] ?? 'status');
+        if (!isset(ETD_HOOK_KINDS[$kind])) {
+            etd_api_error('bad_request', '"kind" musí být "status" (stav průvodek) nebo "urgent" (urgenty).', 400);
+        }
+        $reg = etd_hook_register($key, $url, $secret, $codes, ['kind' => $kind, 'name' => $input['name'] ?? '', 'ref' => $input['ref'] ?? '', 'notes' => $notes,
+            'family' => !empty($input['family'])]);
         $results = [];
         foreach ($reg['codes'] as $code) {
             $item = etd_hook_item($code);

@@ -670,7 +670,7 @@ class WatchApiTests(Base):
         status, data = self.watch(method="GET")
         self.assertEqual((data["connected"], data["status"]["watching"], data["status"]["queued"], data["status"]["status"]), (True, 1, 1, "waiting"))
         status, log = self.admin.get("adminlog")
-        self.assertEqual(sum("živé propojení" in l["text"] for l in log["log"]), 1)
+        self.assertEqual(sum("Připojena tabulka" in l["text"] for l in log["log"]), 1)
         # Google nedostupný: úloha zapíše chybu a počká, fronta zůstane
         out = self.server.cli("bin/hook-worker.php", "--once")
         self.assertIn("Odesláno průvodek: 0", out.stdout)
@@ -716,13 +716,162 @@ class WatchApiTests(Base):
         self.assertEqual(status, 404)
 
 
+V3_HOOKS = """
+CREATE TABLE hooks (id INTEGER PRIMARY KEY, api_key_id INTEGER NOT NULL UNIQUE REFERENCES api_keys(id), url TEXT NOT NULL, secret TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1, watch_count INTEGER NOT NULL DEFAULT 0, sent_count INTEGER NOT NULL DEFAULT 0, last_ok_at INTEGER, last_error TEXT,
+    last_error_at INTEGER, fails INTEGER NOT NULL DEFAULT 0, retry_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE hook_watch (hook_id INTEGER NOT NULL REFERENCES hooks(id) ON DELETE CASCADE, barcode TEXT NOT NULL COLLATE NOCASE, PRIMARY KEY (hook_id, barcode)) WITHOUT ROWID;
+CREATE INDEX idx_hook_watch_barcode ON hook_watch(barcode);
+CREATE TABLE hook_queue (hook_id INTEGER NOT NULL REFERENCES hooks(id) ON DELETE CASCADE, barcode TEXT NOT NULL COLLATE NOCASE, ver INTEGER NOT NULL DEFAULT 1,
+    queued_at INTEGER NOT NULL, PRIMARY KEY (hook_id, barcode)) WITHOUT ROWID;
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+"""
+
+
+class SheetsV14Tests(Base):
+    """1.4: víc tabulek na jeden klíč (rozlišené ref) a tabulky s urgenty."""
+
+    SERVER_ENV = {"ETD_HOOK_TEST": "1"}
+    SECRET = "s" * 64
+
+    def setUp(self):
+        super().setUp()
+        status, data = self.admin.post("apikey_create", {"name": "Tabulky"})
+        self.key = data["key"]
+        self.url = f"http://127.0.0.1:{free_port()}/macros/s/zavreny/exec"
+
+    def watch(self, body=None, method="POST", query=""):
+        headers = {"X-Etd": None, "X-Etd-Client": None, "Authorization": "Bearer " + self.key}
+        return Client(self.server).request(method, "/api/v1/watch" + query, body, headers=headers)
+
+    def body(self, **kw):
+        return dict({"url": self.url, "secret": self.SECRET, "barcodes": ["U-1", "U-2"]}, **kw)
+
+    def test_more_sheets_per_key(self):
+        self.assertEqual(self.watch(self.body())[0], 200)                       # skript 1.3: bez ref
+        self.assertEqual(self.watch(self.body(barcodes=["U-3"]))[0], 200)       # tentýž (bez ref) se jen přepíše
+        self.assertEqual(self.watch(self.body(ref="t1#0", name="Kooperace / List 1"))[0], 200)
+        self.assertEqual(self.watch(self.body(ref="t2#5", name="Urgenty / Urgenty", kind="urgent"))[0], 200)
+        status, hooks = self.admin.get("hooks")
+        self.assertEqual(sorted((h["name"], h["kind"], h["watching"]) for h in hooks["hooks"]),
+                         [("", "status", 1), ("Kooperace / List 1", "status", 2), ("Urgenty / Urgenty", "urgent", 2)])
+        status, data = self.watch(method="GET", query="?ref=t2%235")
+        self.assertEqual([s["name"] for s in data["sheets"]], ["Urgenty / Urgenty"])
+        status, data = self.watch(method="DELETE", query="?ref=t2%235")
+        self.assertEqual(data["count"], 1)
+        status, data = self.watch(method="GET")
+        self.assertEqual(len(data["sheets"]), 2)
+        status, data = self.watch(self.body(kind="nic"))
+        self.assertEqual(status, 400)
+        status, data = self.watch(self.body(notes=["seznam"]))
+        self.assertEqual(status, 400)
+        for i in range(18):
+            self.watch(self.body(ref=f"x{i}"))
+        status, data = self.watch(self.body(ref="navic"))
+        self.assertEqual((status, data["error"]), (409, "too_many_sheets"))
+        status, data = self.watch(method="DELETE")
+        self.assertEqual(data["count"], 20, "DELETE bez ref odpojí všechny tabulky klíče")
+
+    def test_urgent_until_export(self):
+        worker, _ = self.user("dvorak", depts=["hala", "elox"])
+        self.watch(self.body(ref="u", kind="urgent", barcodes=["U-1", "U-2"], notes={"u-1": "expres"}))
+        worker.dept("hala")
+        status, data = worker.get("urgent")
+        self.assertEqual((data["here"], data["counts"]), ([], {}), "urgent, který ještě nikde neleží, nesvítí")
+        status, data = worker.scan("prijem", [{"barcode": "u-1"}, {"barcode": "JINA"}], position="R3")
+        self.assertEqual([r.get("urgent") for r in data["results"]], [{"note": "expres"}, None])
+        status, data = worker.get("urgent")
+        self.assertEqual([(u["barcode"], u["note"], u["last"]["position"]) for u in data["here"]], [("u-1", "expres", "R3")])
+        self.assertEqual(data["counts"], {"hala": 1})
+        status, onsite = worker.get("onsite")
+        self.assertEqual((sorted(onsite["urgent"]), onsite["urgentCounts"]), (["u-1", "u-2"], {"hala": 1}))
+        status, found = worker.get("search", q="U-1")
+        self.assertEqual(found["exact"]["urgent"], "expres")
+        # na jiném pracovišti nesvítí; Visitor nemá pracoviště
+        worker.dept("elox")
+        self.assertEqual(worker.get("urgent")[1]["here"], [])
+        worker.dept("hala")
+        worker.scan("export", [{"barcode": "U-1", "qty": 1}])
+        status, data = worker.get("urgent")
+        self.assertEqual((data["here"], data["counts"]), ([], {}), "po exportu urgent zhasne")
+        status, data = worker.get("urgent", all="1")
+        self.assertEqual(sorted((u["barcode"], u["last"]["action"] if u["last"] else None) for u in data["all"]), [("U-1", "export"), ("U-2", None)])
+        # storno exportu: urgent zase svítí
+        status, recent = worker.get("recent")
+        worker.post("cancel", {"id": recent["records"][0]["id"]})
+        self.assertEqual(len(worker.get("urgent")[1]["here"]), 1)
+        # zrušený klíč: urgenty z jeho tabulek neplatí
+        status, keys = self.admin.get("apikeys")
+        self.admin.post("apikey_revoke", {"id": keys["keys"][0]["id"]})
+        self.assertEqual(worker.get("urgent")[1]["here"], [])
+
+    def test_urgent_subparts_of_assembly(self):
+        worker, _ = self.user("dvorak", depts=["hala"])
+        worker.dept("hala")
+        self.watch(self.body(ref="u", kind="urgent", family=True, barcodes=["12345.678901.23456"], notes={"12345.678901.23456": "sestava"}))
+        self.watch(self.body(ref="v", kind="urgent", barcodes=["55555.111111.22222"]))      # bez poddílů
+        status, data = worker.scan("prijem", [{"barcode": "12345.678902.23411"}, {"barcode": "12345.678801.23456"},
+                                              {"barcode": "12345.67890.23456"}, {"barcode": "55555.111199.22299"}, {"barcode": "12345.678901.23456"}], position="P1")
+        self.assertEqual([r.get("urgent") for r in data["results"]], [
+            {"note": "sestava", "of": "12345.678901.23456", "mask": "12345.6789xx.234xx"},   # poddíl: liší se poslední dvojčíslí
+            None,                                                                           # jiné číslo před dvojčíslím
+            None,                                                                           # jiný tvar
+            None,                                                                           # tabulka bez poddílů
+            {"note": "sestava"},                                                            # sestava sama
+        ])
+        status, data = worker.get("urgent")
+        self.assertEqual(sorted((u["barcode"], u["of"]) for u in data["here"]),
+                         [("12345.678901.23456", None), ("12345.678902.23411", "12345.678901.23456")])
+        self.assertEqual(data["counts"], {"hala": 2})
+        status, found = worker.get("search", q="12345.678902.23411")
+        self.assertEqual((found["exact"]["urgent"], found["exact"]["urgentOf"]), ("sestava", "12345.678901.23456"))
+        status, data = worker.get("urgent", all="1")
+        self.assertEqual(sorted(u["barcode"] for u in data["all"]), ["12345.678901.23456", "12345.678902.23411", "55555.111111.22222"])
+        # export poddílu: zhasne jen on
+        worker.scan("export", [{"barcode": "12345.678902.23411", "qty": 1}])
+        self.assertEqual([u["barcode"] for u in worker.get("urgent")[1]["here"]], ["12345.678901.23456"])
+        status, hooks = self.admin.get("hooks")
+        self.assertEqual(sorted((h["ref"], h["family"]) for h in hooks["hooks"]), [("u", True), ("v", False)])
+
+    def test_upgrade_from_schema_3_keeps_sheet(self):
+        self.server.stop()
+        data = self.server.data
+        with sqlite3.connect(data / "evidence.sqlite3") as db:
+            db.execute("DROP TABLE hook_queue"); db.execute("DROP TABLE hook_watch"); db.execute("DROP TABLE hooks"); db.execute("DROP TABLE meta")
+            db.executescript(V3_HOOKS)
+            key_id = db.execute("SELECT id FROM api_keys").fetchone()[0]
+            db.execute("INSERT INTO hooks (id, api_key_id, url, secret, watch_count, sent_count, created_at, updated_at) VALUES (7, ?, ?, ?, 2, 5, 1, 1)", (key_id, self.url, self.SECRET))
+            db.execute("INSERT INTO hook_watch VALUES (7, 'A-1'), (7, 'A-2')")
+            db.execute("INSERT INTO hook_queue VALUES (7, 'A-1', 3, 1)")
+            db.execute("PRAGMA user_version = 3")
+        self.server = Server(data, **self.SERVER_ENV)
+        self.admin = Client(self.server)
+        self.admin.login("spravce")
+        status, hooks = self.admin.get("hooks")
+        h = hooks["hooks"][0]
+        self.assertEqual((h["id"], h["watching"], h["queued"], h["sent"], h["kind"], h["name"]), (7, 2, 1, 5, "status", ""))
+        with self.server.db() as db:
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM hook_watch").fetchone()[0], 2)
+            self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+        # skript 1.3 (bez ref) dál aktualizuje stejné propojení, nevznikne druhé
+        status, data = self.watch(self.body(barcodes=["A-1"]))
+        self.assertEqual(status, 200, data)
+        status, hooks = self.admin.get("hooks")
+        self.assertEqual([(h["id"], h["watching"]) for h in hooks["hooks"]], [(7, 1)])
+        # cizí klíče po aktualizaci platí: odpojení smaže i sledované průvodky
+        self.admin.post("hook_delete", {"id": 7})
+        with self.server.db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM hook_watch").fetchone()[0], 0)
+
+
 class DataTests(Base):
     def test_backup_rebuild_and_reopen_keep_data(self):
         self.admin.dept("hala")
         self.admin.scan("prijem", [{"barcode": f"B-{i}"} for i in range(30)], position="A1", define=True)
         self.admin.scan("export", [{"barcode": "B-1", "qty": 2}])
         with self.server.db() as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
             parts_before = sorted(db.execute("SELECT barcode, last_id, last_action, last_dept FROM parts").fetchall())
         backups = self.server.data / "zalohy"
         out = self.server.cli("bin/backup-db.php", str(backups))
@@ -953,10 +1102,11 @@ class UpgradeTests(unittest.TestCase):
             status, data_ = client.post("user_save", {"login": "novak", "name": "Novák", "role": "operator", "depts": ["hala"], "passwordMode": "self", "active": True})
             self.assertEqual(status, 200, data_)
             with server.db() as db:
-                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
                 self.assertIn("pending_until", [r[1] for r in db.execute("PRAGMA table_info(users)")])
                 tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
                 self.assertTrue({"hooks", "hook_watch", "hook_queue", "meta"} <= tables, "schéma 3 (živé propojení)")
+                self.assertIn("kind", [r[1] for r in db.execute("PRAGMA table_info(hooks)")], "schéma 4 (víc tabulek, urgenty)")
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM records").fetchone()[0], 2)
         finally:
             server.stop()

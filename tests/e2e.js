@@ -273,6 +273,34 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     [st] = await j('/api/v1/last?barcode=PR-2001');
     check(st === 401, 'API bez klíče: 401');
 
+    /* --- urgenty (1.4): tabulka s urgenty, pás na pracovišti, dokud neodejde exportem --- */
+    [st, body] = await j('/api/v1/watch', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: 'https://script.google.com/macros/s/AKfycbxE2Etest1234567890urg/exec', secret: 'u'.repeat(64), kind: 'urgent', family: true, ref: 'urg#1',
+        name: 'Urgenty / List 1', barcodes: ['12345.678901.23456'], notes: { '12345.678901.23456': 'zákazník čeká' } }) });
+    check(st === 200 && body.watching === 1, 'API: tabulka s urgenty se připojí');
+    await page.click('[data-tab=prijem]');
+    await page.waitForSelector('#scanInput');
+    check(await page.isHidden('#urgentBar'), 'bez urgentu na pracovišti pás nesvítí');
+    await scan(page, '12345.678902.23411');
+    await waitResult(page, /URGENT/);
+    check((await resultText(page)).includes('Poddíl urgentní sestavy 12345.678901.23456'), 'příjem poddílu urgentní sestavy: výsledek ho označí');
+    await page.waitForSelector('#urgentBar:not([hidden])');
+    const bar = await page.locator('#urgentBar').innerText();
+    check(bar.includes('Urgent na pracovišti') && bar.includes('12345.678902.23411') && bar.includes('zákazník čeká'), 'pás „Urgent na pracovišti“ s průvodkou a poznámkou');
+    await shot(page, '09b-urgent');
+    await page.click('[data-tab=export]');
+    await page.waitForSelector('#scanInput');
+    check(await page.isVisible('#urgentBar'), 'pás svítí i na jiných záložkách');
+    if (await page.isChecked('#optMulti')) await page.uncheck('#optMulti', { force: true });
+    await scan(page, '12345.678902.23411');
+    await page.waitForSelector('#qtyInput');
+    await page.fill('#qtyInput', '3'); await page.press('#qtyInput', 'Enter');
+    await waitResult(page, /Urgent odešel/);
+    await page.waitForSelector('#urgentBar', { state: 'hidden' });
+    check(true, 'po exportu z pracoviště urgent zhasne');
+    await page.click('[data-tab=api]');
+    await page.waitForSelector('.endpoint');
+
     /* --- pracovník: vlastní heslo, jen jeho oddělení --- */
     await page.click('[data-menu]');
     await page.click('[data-m=logout]');

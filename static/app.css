@@ -22,6 +22,7 @@
   --warn-bg: #fcf1d8;
   --crit: #b8322a;
   --crit-bg: #fbe8e6;
+  --urgent: #b8322a;          /* pás a odznak urgentů: bílý text, stejně sytá v obou režimech */
   --prijem: #0f766e;
   --prijem-bg: #dff3f0;
   --export: #4338ca;
@@ -65,6 +66,7 @@
     --warn-bg: #33270e;
     --crit: #f2837a;
     --crit-bg: #3a1714;
+    --urgent: #a8261e;
     --prijem: #4fd1c1;
     --prijem-bg: #0f2f2c;
     --export: #9aa2ff;
@@ -515,6 +517,36 @@ details summary { cursor: pointer; color: var(--accent); font-weight: 600; }
   .gs-demo-row { grid-template-columns: minmax(0, 1fr); }
   .gs-demo-row .gflow-arrow { margin: 4px auto; height: 16px; }
 }
+
+/* ---------- urgenty ---------- */
+.urgent-bar { position: relative; background: var(--urgent); color: #fff; box-shadow: 0 6px 18px color-mix(in srgb, var(--urgent) 35%, transparent); }
+.urgent-in { max-width: 1240px; margin: 0 auto; padding: 10px 20px; display: flex; align-items: center; gap: 14px; }
+.urgent-ico { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; background: rgba(255, 255, 255, .18); font-size: 1.25rem; animation: urgent-pulse 1.6s ease-in-out infinite; }
+@keyframes urgent-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, .55); } 60% { box-shadow: 0 0 0 12px rgba(255, 255, 255, 0); } }
+.urgent-txt { display: grid; gap: 1px; min-width: 0; flex: 1; }
+.urgent-txt b { font-size: 1.05rem; }
+.urgent-txt span { font-size: .875rem; opacity: .9; }
+.urgent-toggle { background: rgba(255, 255, 255, .15); border-color: rgba(255, 255, 255, .35); color: #fff; }
+.urgent-toggle:hover { background: rgba(255, 255, 255, .25); }
+.urgent-list { max-width: 1240px; margin: 0 auto; padding: 0 20px 12px; display: grid; gap: 6px; }
+.urgent-item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 7px 12px; border-radius: 9px; background: rgba(0, 0, 0, .16); }
+.urgent-item.new { animation: urgent-new 1.2s ease-out 2; }
+@keyframes urgent-new { from { background: rgba(255, 255, 255, .45); } to { background: rgba(0, 0, 0, .16); } }
+.urgent-item .code-btn { color: #fff; font-weight: 800; }
+.urgent-item .muted { color: rgba(255, 255, 255, .8); }
+.urgent-pos b { font-size: 1.05rem; }
+.urgent-of { padding: 1px 9px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .45); font-size: .8rem; font-weight: 700; }
+.urgent-note { padding: 1px 9px; border-radius: 999px; background: rgba(255, 255, 255, .2); font-weight: 600; font-size: .875rem; }
+@media (prefers-reduced-motion: reduce) { .urgent-ico, .urgent-item.new { animation: none; } }
+.result.urgent { border-color: var(--crit); background: var(--crit-bg); }
+.result.urgent .ico { background: var(--crit); color: #fff; }
+.tile-urgent { margin-top: auto; padding: 2px 10px; border-radius: 999px; background: var(--urgent); color: #fff; font-size: .8rem; font-weight: 800; animation: urgent-pulse 1.6s ease-in-out infinite; }
+tr.u-there td { background: color-mix(in srgb, var(--crit) 7%, transparent); }
+.urgent-card { border-color: color-mix(in srgb, var(--crit) 45%, var(--line)); }
+.gs-kind, .gs-note { grid-column: 1 / -1; }
+.gs-note .input { width: min(160px, 100%); }
+.gs-cell.urgent-demo { border-color: var(--crit); box-shadow: inset 3px 0 0 var(--crit); }
+@media (max-width: 760px) { .urgent-in, .urgent-list { padding-left: 14px; padding-right: 14px; } .urgent-txt span { display: none; } }
 
 /* ---------- pomocné třídy (CSP nepovoluje style="…") ---------- */
 .mt-4 { margin-top: 4px; }

@@ -13,7 +13,26 @@ Po každé větší práci **aktualizuj sekci „Kde jsme skončili“**.
 
 ## Kde jsme skončili
 
-Stav k 31. 10. 2026, verze **1.3.4** (schéma databáze 3):
+Stav k 31. 10. 2026, verze **1.4** (schéma databáze 4):
+
+- 1.4: „připojit více google tabulek“ a „tabulka s urgenty: pracovníkům pro dané oddělení vyskočí
+  upozornění, že mají urgent na pracovišti, a svítí, dokud neprovedou export z pracoviště“; pak
+  doplnil „některé urgenty jsou sestavy a mají poddíl … hledat shody podle AAAAA.BBBBXX.CCCXX,
+  systém mění poslední dvojčíslí“ (jeho skutečná čísla do repa nedávej).
+  - Schéma 4: `hooks` přestavěná (SQLite neumí odebrat UNIQUE(api_key_id)): nově `kind`
+    (`status`/`urgent`), `name`, `ref` (ID tabulky#ID listu; UNIQUE(api_key_id, ref), '' = skript 1.3),
+    `match_family`; `hook_watch.note`. Migrace s `PRAGMA foreign_keys = OFF` mimo transakci,
+    kopie řádků se stejnými id, pak `foreign_key_check`. Ověřeno testem (schéma 3 → 4) i na Apachi.
+  - Urgenty (`lib/hooks.php`): `etd_urgent_index` (všechny urgenty z aktivních tabulek, cache na
+    požadavek), `etd_urgent_match` (přesně, nebo poddíl přes `etd_family`: 2. a 3. část bez
+    posledního dvojčíslí), `etd_urgent_list($dept)` = průvodky s příjmem na pracovišti, které
+    sedí; bez dept i urgenty, které nikde neleží. Párování v PHP (bez SQL funkcí).
+  - Stránka: `api.php?action=urgent` (here/all/counts), `scan` vrací `urgent` (`note`, u poddílu
+    `of`, `mask`), `onsite` `urgent` + `urgentCounts`, `search` `urgent`/`urgentOf`. Pás
+    `#urgentBar` pod záložkami (`loadUrgent`, každých 20 s, po skenu urgentu; nový = zvuk + toast),
+    odznaky na výběru oddělení, karta Urgentní průvodky v Na pracovištích, barva `--urgent`.
+  - Skript: `typ`, `sloupecPoznamka`, `podDily`, `sloupecVysledek` může být ''; posílá `ref`, `name`,
+    `kind`, `notes`, `family`; GET/DELETE `watch?ref=`. Generátor: typ tabulky, poznámka, poddíly.
 
 - 1.3.4: v pásu na úvodní stránce zůstala jen řada štítků („nechal bych tam jen tu jednu verzi
   v těch buňkách“); obrysové velké názvy pryč.
@@ -173,9 +192,10 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
   Na něm stojí poslední záznam, částečné hledání i Na pracovištích.
 - `api_keys` (jen otisk klíče, prefix pro zobrazení), `attempts` (neúspěšná přihlášení a klíče),
   `admin_log` (historie správy).
-- Schéma 3 (1.3): `hooks` (propojení na API klíč: url, `secret` v čitelné podobě kvůli podpisu,
-  počítadla, `fails`, `retry_at`), `hook_watch` (sledované barcody, NOCASE), `hook_queue`
-  (co poslat, `ver`), `meta` (`worker_seen_at`).
+- Schéma 3 (1.3): `hooks` (propojení: url, `secret` v čitelné podobě kvůli podpisu, počítadla,
+  `fails`, `retry_at`), `hook_watch` (sledované barcody, NOCASE), `hook_queue` (co poslat, `ver`),
+  `meta` (`worker_seen_at`). Schéma 4 (1.4): `hooks.kind/name/ref/match_family`, `hook_watch.note`;
+  propojení = API klíč + `ref` (víc tabulek na klíč).
 - Nová verze schématu: přidej blok `if ($version < N)` do `etd_migrate` a zvyš `ETD_SCHEMA`.
   Jen přidávat (tabulky, sloupce s výchozí hodnotou), nic nemazat. Nové oddělení = nový řádek
   v `ETD_DEPTS` (kód se ukládá do záznamů, neměň ho), barva `--d-N` a třída `.dept-<kód>`
@@ -185,7 +205,7 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
 ## Vývoj a testy v cloudové session
 
 ```bash
-python3 -m unittest discover -s tests     # 36 testů, asi 20 s
+python3 -m unittest discover -s tests     # 40 testů, asi 20 s
 node tests/test_scan.js
 node tests/e2e.js                         # SHOTS=/adresář uloží snímky
 node tests/e2e_camera.js                  # fotoaparát (Chromium s --use-file-for-fake-video-capture)

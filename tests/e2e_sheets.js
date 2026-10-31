@@ -215,8 +215,76 @@ const ETD = { api: '${BASE}/api/v1/', list: 'List1', sloupecBarcode: 'D', parame
   await page('hook_delete', { id: hooks.hooks[0].id });
   assert.deepStrictEqual((await page('hooks')).hooks, []);
   const log = (await page('adminlog')).log.map(l => l.text).join('\n');
-  assert.match(log, /Zapnuto živé propojení s Google tabulkou \(klíč „Kooperace Hala 2“\), sleduje 3 průvodek/);
-  assert.match(log, /Vypnuto živé propojení/);
+  assert.match(log, /Připojena tabulka „Kooperace \/ List 1“ \(klíč „Kooperace Hala 2“\), sleduje 3 průvodek/);
+  assert.match(log, /Odpojena tabulka „Kooperace \/ List 1“ \(klíč „Kooperace 2“\)/);
+
+  // 11) víc tabulek se stejným klíčem: stav (List 1) + urgenty (druhá tabulka, vlastní skript a webová aplikace)
+  answer('');
+  run('etdZapnout');
+  const STATE2 = path.join(TMP, 'state2.json');
+  const SCRIPT2 = path.join(TMP, 'urgenty.js');
+  fs.writeFileSync(SCRIPT2, template.replace(/\/\/ <nastaveni>[\s\S]*\/\/ <\/nastaveni>/, `// <nastaveni>
+const ETD = { api: '${BASE}/api/v1/', list: 'Urgenty', sloupecBarcode: 'A', parametrOdkazu: '', sloupecVysledek: '', prvniRadek: 2, typ: 'urgent', sloupecPoznamka: 'B', podDily: false };
+// </nastaveni>`));
+  save(STATE2, {
+    props: {}, triggers: [], answers: [], alerts: [], googleMode: 'ok', spreadsheetId: 'tabulka-urgenty', spreadsheetName: 'Urgenty týdne',
+    sheets: { Urgenty: {
+      A1: { v: 'Barcode' }, B1: { v: 'Poznámka' },
+      A2: { v: 'NOVA.1' }, B2: { v: 'do pátku, zákazník čeká' },
+      A3: { v: 'URG-7' },
+      A4: { v: '12345.678901.23457' }, B4: { v: 'expres' },
+    } },
+  });
+  const g2Port = await freePort();
+  const WEBAPP2 = `http://127.0.0.1:${g2Port}/macros/s/AKfycbURGENTurgentURGENT1/exec`;
+  procs.push(spawn('node', [path.join(__dirname, 'fake_google.js'), String(g2Port), STATE2, SCRIPT2], { env: ENV, stdio: ['ignore', 'ignore', 'inherit'] }));
+  await waitPort(g2Port);
+  const run2 = (fn, ...args) => makeEnv(STATE2, fs.readFileSync(SCRIPT2, 'utf8'))[fn](...args);
+  const alert2 = () => { const a = load(STATE2).alerts || []; return a[a.length - 1] || ''; };
+  const answer2 = (...a) => { const st = load(STATE2); st.answers = a; save(STATE2, st); };
+  answer2(key2); run2('etdNastavitKlic');
+  answer2(WEBAPP2); run2('etdZapnout');
+  assert.match(alert2(), /Živé propojení je zapnuté/, alert2());
+  assert.match(alert2(), /Urgentních průvodek: 3, v Evidenci je z nich 2/, alert2());
+  hooks = (await page('hooks')).hooks;
+  assert.deepStrictEqual(hooks.map(h => [h.name, h.kind, h.keyName]).sort(),
+    [['Kooperace / List 1', 'status', 'Kooperace 2'], ['Urgenty týdne / Urgenty', 'urgent', 'Kooperace 2']], 'dvě tabulky na jednom klíči');
+  assert.deepStrictEqual(Object.keys(load(STATE2).sheets.Urgenty).sort(), ['A1', 'A2', 'A3', 'A4', 'B1', 'B2'].concat(['B4']).sort(), 'bez výsledkového sloupce se do tabulky urgentů nic nezapisuje');
+
+  // urgent na pracovišti: NOVA.1 leží na Eloxu (příjem s pozicí X9), 23457 na Hale 2
+  await page('dept', { dept: 'elox' });
+  let urg = await page('urgent');
+  assert.deepStrictEqual(urg.here.map(u => [u.barcode, u.note, u.last.position]), [['NOVA.1', 'do pátku, zákazník čeká', 'X9']]);
+  assert.deepStrictEqual(urg.counts, { elox: 1, hala: 1 });
+  await page('dept', { dept: 'hala' });
+  urg = await page('urgent', null);
+  assert.deepStrictEqual(urg.here.map(u => u.barcode), ['12345.678901.23457']);
+  // příjem urgentu jinde: výsledek skenu ho označí, svítí na novém pracovišti
+  await page('dept', { dept: 'montaz' });
+  const scanned = await page('scan', { action: 'prijem', items: [{ barcode: 'urg-7' }], position: 'M1' });
+  assert.deepStrictEqual(scanned.results[0].urgent, { note: '' });
+  assert.deepStrictEqual((await page('urgent')).here.map(u => u.barcode), ['urg-7']);
+  // export z pracoviště: urgent zhasne
+  const out = await page('scan', { action: 'export', items: [{ barcode: 'URG-7', qty: 2 }] });
+  assert.ok(out.results[0].urgent, 'i export urgentu se ve výsledku označí');
+  assert.deepStrictEqual((await page('urgent')).here, []);
+  const all = await page('urgent&all=1');
+  assert.deepStrictEqual(all.all.map(u => [u.barcode.toLowerCase(), u.last.action]).sort(), [['12345.678901.23457', 'prijem'], ['nova.1', 'prijem'], ['urg-7', 'export']]);
+  // obyčejná (stavová) tabulka urgenty nedělá
+  const plain = await page('scan', { action: 'prijem', items: [{ barcode: '12345.678901.23456' }], position: '' });
+  assert.strictEqual(plain.results[0].urgent, undefined);
+  // urgent smazaný z tabulky přestane svítit
+  const s2 = load(STATE2); delete s2.sheets.Urgenty.A2; delete s2.sheets.Urgenty.B2; save(STATE2, s2);
+  run2('etdPriUprave', { range: makeEnv(STATE2, fs.readFileSync(SCRIPT2, 'utf8')).__range('Urgenty', 2, 1, 1) });
+  await page('dept', { dept: 'elox' });
+  assert.deepStrictEqual((await page('urgent')).here, []);
+  // stav každé tabulky zvlášť, vypnutí jen té jedné
+  run2('etdStav');
+  assert.match(alert2(), /tabulka s urgenty/);
+  run2('etdVypnout');
+  assert.match(alert2(), /už v Evidenci nejsou urgentní/);
+  assert.deepStrictEqual((await page('hooks')).hooks.map(h => h.kind), ['status'], 'tabulka stavu zůstala připojená');
+  assert.deepStrictEqual((await page('urgent')).counts, {});
 
   console.log('e2e_sheets: vše v pořádku (' + load(STATE).fetches.length + ' volání API z tabulky, ' + load(STATE).writes + ' zápisů do listu)');
 })().catch(err => { console.error(err); process.exitCode = 1; }).finally(() => {

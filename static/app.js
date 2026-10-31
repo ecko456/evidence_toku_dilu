@@ -496,6 +496,13 @@
     const back = $('[data-back]'); if (back) back.onclick = () => { picking = false; route(); };
     $$('[data-dept]').forEach(b => { b.onclick = () => chooseDept(b.dataset.dept); });
     const first = $('.tile.current') || $('.tile:not(:disabled)'); if (first) first.focus();
+    // urgenty na pracovištích: odznak na dlaždici
+    api('urgent').then(d => {
+      Object.entries(d.counts || {}).forEach(([code, n]) => {
+        const tile = $(`.tile[data-dept="${CSS.escape(code)}"]`);
+        if (tile && n) tile.insertAdjacentHTML('beforeend', `<span class="tile-urgent" title="Urgentní průvodky na pracovišti">⚡ ${num(n)} ${SC.plural(n, 'urgent', 'urgenty', 'urgentů')}</span>`);
+      });
+    }).catch(() => { /* bez odznaků */ });
   }
 
   async function chooseDept(code) {
@@ -537,8 +544,11 @@
           </div></div>
       </div></header>
       <nav class="tabs" aria-label="Části aplikace"><div class="tabs-in">${tabs().map(([id, label]) => `<button class="tab t-${id}" type="button" data-tab="${id}">${esc(label)}</button>`).join('')}</div></nav>
+      <section id="urgentBar" class="urgent-bar" aria-live="assertive" hidden></section>
       <main id="view" class="wrap"></main>`;
     $('[data-pick]').onclick = () => { picking = true; route(); };
+    urgentShown = null;
+    loadUrgent();
     const menuBtn = $('[data-menu]'), menu = $('.menu');
     menuBtn.onclick = e => { e.stopPropagation(); menu.hidden = !menu.hidden; menuBtn.setAttribute('aria-expanded', String(!menu.hidden)); };
     menu.onclick = async e => {
@@ -554,6 +564,42 @@
     $$('[data-tab]').forEach(b => { b.onclick = () => { if (location.hash.slice(1).split('?')[0] !== b.dataset.tab) location.hash = b.dataset.tab; else showTab(); }; });
     showTab();
   }
+
+  /* ---------- urgenty na pracovišti ----------
+     Průvodky z tabulky s urgenty, které leží na pracovišti přihlášeného (poslední záznam je příjem
+     tady). Pás svítí nad obsahem všech záložek, dokud je pracoviště neexportuje. */
+  let urgentShown = null;      // barcody, které pás ukazuje (null = ještě nenačteno)
+  let urgentOpen = store.get('urgentOpen', true);
+  let urgentTimer = 0;
+  async function loadUrgent() {
+    clearTimeout(urgentTimer);
+    const bar = $('#urgentBar');
+    if (!bar || !ST || !ST.dept || ST.dept === 'visitor') { if (bar) bar.hidden = true; return; }
+    let d;
+    try { d = await api('urgent'); } catch (e) { urgentTimer = setTimeout(loadUrgent, 30000); return; }
+    if (!document.body.contains(bar)) return;
+    const items = d.here || [];
+    const codes = items.map(u => u.barcode.toLowerCase());
+    const fresh = urgentShown ? codes.filter(c => !urgentShown.includes(c)) : [];
+    urgentShown = codes;
+    bar.hidden = !items.length;
+    if (items.length) {
+      bar.innerHTML = `<div class="urgent-in"><span class="urgent-ico" aria-hidden="true">⚡</span>
+        <div class="urgent-txt"><b>${items.length === 1 ? 'Urgent' : `${num(items.length)} ${SC.plural(items.length, 'urgent', 'urgenty', 'urgentů')}`} na pracovišti ${esc(ST.deptName)}</b>
+          <span>Svítí, dokud ${items.length === 1 ? 'průvodku' : 'průvodky'} z pracoviště neexportuješ.</span></div>
+        <button class="btn small urgent-toggle" type="button" data-utoggle aria-expanded="${urgentOpen}">${urgentOpen ? 'Skrýt seznam' : 'Zobrazit'}</button></div>
+        <div class="urgent-list"${urgentOpen ? '' : ' hidden'}>${items.map(u => `<div class="urgent-item${fresh.includes(u.barcode.toLowerCase()) ? ' new' : ''}">
+          ${codeBtn(u.barcode)}${u.of ? `<span class="urgent-of" title="Shoda ${esc(u.mask || '')}">poddíl sestavy ${esc(u.of)}</span>` : ''}<span class="urgent-pos">${u.last && u.last.position ? `pozice <b>${esc(u.last.position)}</b>` : 'bez pozice'}</span>
+          <span class="muted small">${u.last ? `přijato ${esc(agoUnix(u.last.recorded_at_unix))} (${esc(u.last.user)})` : ''}</span>
+          ${u.note ? `<span class="urgent-note">${esc(u.note)}</span>` : ''}</div>`).join('')}</div>`;
+      $('[data-utoggle]', bar).onclick = () => { urgentOpen = !urgentOpen; store.set('urgentOpen', urgentOpen); urgentShown = null; loadUrgent(); };
+      if (fresh.length) { beep('warn'); toast(`⚡ Nový urgent na pracovišti: ${fresh.length === 1 ? items.find(u => u.barcode.toLowerCase() === fresh[0]).barcode : `${fresh.length} průvodek`}`, 'err', 9000); }
+    } else {
+      bar.innerHTML = '';
+    }
+    urgentTimer = setTimeout(loadUrgent, document.hidden ? 60000 : 20000);
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && $('#urgentBar')) loadUrgent(); });
 
   function showTab() {
     const id = currentTab();
@@ -643,7 +689,7 @@
     }
 
     function showResult(kind, title, lines, code, actions) {
-      result.innerHTML = `<div class="result ${kind}"><span class="ico">${kind === 'ok' ? '✓' : kind === 'warn' ? '!' : '✕'}</span><div>
+      result.innerHTML = `<div class="result ${kind}"><span class="ico">${kind === 'ok' ? '✓' : kind === 'urgent' ? '⚡' : kind === 'warn' ? '!' : '✕'}</span><div>
         <h3>${esc(title)}</h3>${code ? `<div class="code">${esc(code)}</div>` : ''}<div class="lines">${lines.map(l => `<span>${l}</span>`).join('')}</div>
         ${actions ? `<div class="acts">${actions}</div>` : ''}</div></div>`;
     }
@@ -652,11 +698,13 @@
     function showOne(r, item) {
       if (r.status === 'ok') {
         const rec = r.record, prev = r.previous;
-        showResult('ok', isIn ? `Přijato na pracoviště ${ST.deptName}` : `Export z pracoviště ${ST.deptName}`, [
+        showResult(r.urgent ? 'urgent' : 'ok', isIn ? `Přijato na pracoviště ${ST.deptName}` : `Export z pracoviště ${ST.deptName}`, [
+          r.urgent ? `<span class="tag crit">⚡ URGENT</span> ${r.urgent.of ? `Poddíl urgentní sestavy <b>${esc(r.urgent.of)}</b>. ` : ''}${isIn ? 'Svítí na pracovišti, dokud průvodku neexportuješ.' : 'Urgent odešel z pracoviště.'}${r.urgent.note ? ` <b>${esc(r.urgent.note)}</b>` : ''}` : '',
           rec.position ? `Pozice: <b>${esc(rec.position)}</b>` : '', rec.quantity != null ? `Počet: <b>${num(rec.quantity)} ks</b>` : '',
           prev ? `Předtím: ${recLine(prev)} · ${esc(agoUnix(prev.recorded_at_unix))}` : 'První záznam této průvodky.',
         ].filter(Boolean), rec.barcode, `<span class="muted small">zapsáno ${esc(when(rec.recorded_at))}</span>`);
-        beep('ok');
+        beep(r.urgent && isIn ? 'warn' : 'ok');
+        if (r.urgent) loadUrgent();
       } else if (r.status === 'duplicate') {
         const l = r.last;
         showResult('warn', 'Už je zapsáno', [`${recLine(l)} · ${esc(agoUnix(l.recorded_at_unix))} (${esc(l.user)}).`, 'Nejspíš dvojí načtení. Když jde opravdu o další záznam, zapiš ho znovu.'],
@@ -822,9 +870,12 @@
       const left = batch.length;
       const dupN = batch.filter(x => x.status === 'duplicate').length;
       const pos = position();
+      const urg = data.results.filter(r => r.urgent).map(r => r.barcode);
+      if (urg.length) loadUrgent();
       if (data.written) {
-        showResult(left ? 'warn' : 'ok', `${isIn ? 'Přijato' : 'Exportováno'} ${data.written} ${SC.plural(data.written, 'průvodka', 'průvodky', 'průvodek')}`,
-          [`${isIn ? 'Na pracoviště' : 'Z pracoviště'} ${esc(ST.deptName)}${pos ? `, pozice <b>${esc(pos)}</b>` : ''}.`,
+        showResult(left ? 'warn' : urg.length ? 'urgent' : 'ok', `${isIn ? 'Přijato' : 'Exportováno'} ${data.written} ${SC.plural(data.written, 'průvodka', 'průvodky', 'průvodek')}`,
+          [urg.length ? `<span class="tag crit">⚡ URGENT</span> ${urg.map(esc).join(', ')}${isIn ? ': svítí na pracovišti, dokud je neexportuješ.' : ': odešly z pracoviště.'}` : '',
+            `${isIn ? 'Na pracoviště' : 'Z pracoviště'} ${esc(ST.deptName)}${pos ? `, pozice <b>${esc(pos)}</b>` : ''}.`,
             left ? `V seznamu ${left === 1 ? 'zůstala 1 průvodka' : `zůstaly ${left} průvodky`}: ${dupN ? 'už zapsané před chvílí (Zapsat přesto)' : 'zkontroluj je'}.` : ''].filter(Boolean));
         beep(left ? 'warn' : 'ok');
       } else {
@@ -1038,7 +1089,7 @@
       if (d.exact) {
         const l = d.exact.last;
         html += l ? `<section class="last-card" aria-label="Poslední záznam">
-            <div class="lc-head"><p class="eyebrow">Poslední záznam</p><div class="code">${esc(d.exact.barcode)}</div><div>${actTag(l)} <span class="muted small">${esc(agoUnix(l.recorded_at_unix))}</span></div></div>
+            <div class="lc-head"><p class="eyebrow">Poslední záznam</p><div class="code">${esc(d.exact.barcode)}${d.exact.urgent != null ? ` <span class="tag crit" title="${esc(d.exact.urgent)}">⚡ ${d.exact.urgentOf ? `poddíl urgentu ${esc(d.exact.urgentOf)}` : 'URGENT'}</span>` : ''}</div><div>${actTag(l)} <span class="muted small">${esc(agoUnix(l.recorded_at_unix))}</span></div></div>
             <div class="lc-body">
               <div class="kv big"><small>Záznam</small><b>${esc(l.action_label)}</b></div>
               <div class="kv big"><small>Oddělení</small><b>${deptTag(l.department, l.department_label)}</b></div>
@@ -1104,26 +1155,45 @@
   /* ---------- na pracovištích ---------- */
   function onsiteView(view) {
     view.innerHTML = `<section class="card"><div class="card-head"><div><h1>Na pracovištích</h1>
-        <p class="hint mt-4">Průvodky, jejichž poslední záznam je příjem na daném pracovišti: díly tam jsou a ještě neodešly exportem.</p></div>
+        <p class="hint mt-4">Průvodky, jejichž poslední záznam je příjem na daném pracovišti: díly tam jsou a ještě neodešly exportem. ⚡ = urgent.</p></div>
         <div class="row"><input class="input onsite-filter" id="onsiteFilter" type="search" placeholder="Filtrovat barcode nebo pozici" aria-label="Filtrovat barcode nebo pozici"><button class="btn" type="button" id="onsiteReload">Obnovit</button></div></div></section>
+      <section class="card urgent-card" id="urgentAll" hidden></section>
       <div class="onsite-grid" id="onsiteGrid"><p class="empty">Načítám…</p></div>`;
     let data = null;
+    let urgentAll = [];
     const filter = $('#onsiteFilter');
     function draw() {
       const q = filter.value.trim().toLowerCase();
+      const isUrgent = code => data.urgent && data.urgent.includes(code.toLowerCase());
+      const ua = $('#urgentAll');
+      const uRows = q ? urgentAll.filter(u => u.barcode.toLowerCase().includes(q) || (u.note || '').toLowerCase().includes(q)) : urgentAll;
+      ua.hidden = !urgentAll.length;
+      ua.innerHTML = urgentAll.length ? `<div class="card-head"><div><h2>⚡ Urgentní průvodky</h2><p class="hint mt-4">Z tabulek s urgenty. Na pracovišti svítí, dokud je odtamtud neexportují.</p></div><span class="tag crit">${num(urgentAll.length)}</span></div>
+        <div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>Barcode</th><th>Kde je</th><th>Pozice</th><th>Od</th><th>Poznámka</th></tr></thead><tbody>
+        ${uRows.map(u => { const l = u.last; const there = l && l.action === 'prijem';
+          return `<tr class="${there ? 'u-there' : ''}"><td data-wide>${codeBtn(u.barcode)}${u.of ? `<span class="sub">poddíl sestavy ${esc(u.of)}</span>` : ''}</td>
+            <td>${l ? (there ? `${deptTag(l.department, l.department_label)}` : `<span class="muted">odešla z ${esc(l.department_label)}</span>`) : '<span class="muted">zatím nikde</span>'}</td>
+            <td>${there && l.position ? `<b>${esc(l.position)}</b>` : '<span class="muted">—</span>'}</td>
+            <td class="nowrap">${l ? esc(agoUnix(l.recorded_at_unix)) : '—'}</td><td>${u.note ? esc(u.note) : '<span class="muted">—</span>'}</td></tr>`; }).join('')}
+        </tbody></table></div>` : '';
       $('#onsiteGrid').innerHTML = data.depts.map(d => {
         const rows = q ? d.records.filter(r => r.barcode.toLowerCase().includes(q) || (r.position || '').toLowerCase().includes(q)) : d.records;
-        return `<section class="card onsite-card dept-${d.code}"><div class="card-head"><div><p class="eyebrow">${deptDot(d.code)}${esc(d.name)}</p><div class="big-n">${num(d.total)}</div>
+        const uN = (data.urgentCounts || {})[d.code] || 0;
+        return `<section class="card onsite-card dept-${d.code}"><div class="card-head"><div><p class="eyebrow">${deptDot(d.code)}${esc(d.name)}</p><div class="big-n">${num(d.total)}${uN ? ` <span class="tag crit">⚡ ${num(uN)} ${SC.plural(uN, 'urgent', 'urgenty', 'urgentů')}</span>` : ''}</div>
             <p class="small muted">${SC.plural(d.total, 'průvodka', 'průvodky', 'průvodek')} na pracovišti</p></div></div>
           ${rows.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Barcode</th><th>Pozice</th><th>Od</th></tr></thead><tbody>
-            ${rows.map(r => `<tr><td>${codeBtn(r.barcode)}<span class="sub">${esc(r.user)}</span></td><td>${r.position ? `<b>${esc(r.position)}</b>` : '<span class="muted">—</span>'}</td>
+            ${rows.map(r => `<tr class="${isUrgent(r.barcode) ? 'u-there' : ''}"><td>${codeBtn(r.barcode)}${isUrgent(r.barcode) ? ' <span class="tag crit">⚡ urgent</span>' : ''}<span class="sub">${esc(r.user)}</span></td><td>${r.position ? `<b>${esc(r.position)}</b>` : '<span class="muted">—</span>'}</td>
               <td class="nowrap" title="${esc(when(r.recorded_at))}">${esc(agoUnix(r.recorded_at_unix))}</td></tr>`).join('')}</tbody></table></div>`
             : `<p class="empty">${q ? 'Nic neodpovídá filtru.' : 'Žádná průvodka.'}</p>`}
           ${d.total > d.records.length ? `<p class="hint">Zobrazeno ${num(d.records.length)} nejnovějších z ${num(d.total)}.</p>` : ''}</section>`;
       }).join('');
     }
     async function load() {
-      try { data = await api('onsite'); if ($('#onsiteGrid')) draw(); }
+      try {
+        const [o, u] = await Promise.all([api('onsite'), api('urgent', undefined, { all: 1 })]);
+        data = o; urgentAll = u.all || [];
+        if ($('#onsiteGrid')) draw();
+      }
       catch (e) { $('#onsiteGrid').innerHTML = `<p class="empty">${esc(e.message)}</p>`; }
     }
     filter.addEventListener('input', () => { if (data) draw(); });
@@ -1135,7 +1205,7 @@
   function adminView(view) {
     view.innerHTML = `<section class="card"><div class="card-head"><div><h1>Uživatelé</h1><p class="hint mt-4">Kdo se smí přihlásit a na která oddělení. Visitor smí každý uživatel; role Jen nahlížení nic nezapíše.</p></div>
         <button class="btn primary" type="button" id="userAdd">+ Přidat uživatele</button></div><div id="usersBox"><p class="empty">Načítám…</p></div></section>
-      <section class="card"><div class="card-head"><div><h2>Google tabulky: živé propojení</h2><p class="hint mt-4">Tabulky, do kterých Evidence sama zapisuje příjem, export i storno sledovaných průvodek. Skript a návod: <a href="#api">API pro IT → Google tabulka</a>.</p></div>
+      <section class="card"><div class="card-head"><div><h2>Google tabulky: živé propojení</h2><p class="hint mt-4">Tabulky, do kterých Evidence sama zapisuje příjem, export i storno sledovaných průvodek, a tabulky s urgenty. Připojit jich jde víc, i se stejným klíčem. Skript a návod: <a href="#api">API pro IT → Google tabulka</a>.</p></div>
         <span id="workerPill"></span></div><div id="hooksBox"><p class="empty">Načítám…</p></div></section>
       <div class="grid-2">
         <section class="card"><div class="card-head"><div><h2>API klíče</h2><p class="hint mt-4">Pro napojení jiných systémů (jen čtení). Návod je v záložce API pro IT.</p></div>
@@ -1182,10 +1252,11 @@
         box.innerHTML = hooks.length ? `<div class="hooks">${hooks.map(h => {
           const [cls, label] = h.keyRevoked ? ['crit', 'klíč je zrušený'] : HOOK_STATUS[h.status] || ['', h.status];
           return `<article class="hook ${h.keyRevoked ? 'off' : 'st-' + h.status}">
-            <div class="hook-head"><div><b>${esc(h.keyName)}</b> <span class="tag ${cls}">${esc(label)}</span><span class="sub mono" title="Adresa webové aplikace tabulky">${esc(h.url)}</span></div>
+            <div class="hook-head"><div><b>${esc(h.name || h.keyName)}</b> ${h.kind === 'urgent' ? '<span class="tag crit">⚡ urgenty</span> ' : ''}<span class="tag ${cls}">${esc(label)}</span>
+              <span class="sub">klíč „${esc(h.keyName)}“ · <span class="mono" title="Adresa webové aplikace tabulky">${esc(h.url)}</span></span></div>
               <div class="row-8"><button class="btn small" type="button" data-hping="${h.id}">Vyzkoušet spojení</button><button class="btn small" type="button" data-hresend="${h.id}">Poslat znovu vše</button><button class="btn ghost small" type="button" data-hdel="${h.id}">Odpojit</button></div></div>
             <div class="hook-stats">
-              <div><span class="num">${h.watching.toLocaleString('cs-CZ')}</span><small>sledovaných průvodek</small></div>
+              <div><span class="num">${h.watching.toLocaleString('cs-CZ')}</span><small>${h.kind === 'urgent' ? 'urgentních průvodek' : 'sledovaných průvodek'}</small></div>
               <div><span class="num">${h.queued.toLocaleString('cs-CZ')}</span><small>čeká na odeslání</small></div>
               <div><span class="num">${h.sent.toLocaleString('cs-CZ')}</span><small>odesláno celkem</small></div>
               <div><span class="num">${h.lastOkAt ? esc(agoUnix(Date.parse(h.lastOkAt) / 1000)) : '—'}</span><small>naposledy doručeno</small></div>
@@ -1215,7 +1286,7 @@
         const h = hooks.find(x => x.id === +del.dataset.hdel);
         const r = await dialog({
           title: 'Odpojit tabulku?', ok: 'Odpojit', cancel: 'Ponechat', danger: true,
-          html: `<p>Evidence přestane do tabulky „${esc(h.keyName)}“ posílat změny. Co v tabulce už je, zůstane.</p><p class="hint">Tabulka se připojí znovu, až v ní někdo dá Evidence → Zapnout živé propojení. Natrvalo ji odpojíš zrušením API klíče.</p>`,
+          html: `<p>Evidence přestane do tabulky „${esc(h.name || h.keyName)}“ posílat změny${h.kind === 'urgent' ? ' a průvodky z ní přestanou být urgentní' : ''}. Co v tabulce už je, zůstane.</p><p class="hint">Tabulka se připojí znovu, až v ní někdo dá Evidence → Zapnout živé propojení. Natrvalo ji odpojíš zrušením API klíče.</p>`,
           validate: async () => { try { await api('hook_delete', { id: h.id }); } catch (err) { return err.message; } return null; },
         });
         if (r.ok) { toast('Tabulka je odpojená.'); loadHooks(); loadLog(); }
@@ -1327,10 +1398,10 @@
       },
     };
     const pre = (text) => `<div class="pre"><pre>${esc(text)}</pre><button class="btn small copy" type="button" data-copy>Kopírovat</button></div>`;
-    const gs = Object.assign({ list: 'List 1', col: 'D', link: true, param: 'activeBarcode', out: 'K', row: 2 }, store.get('gsheet', {}));
+    const gs = Object.assign({ list: 'List 1', col: 'D', link: true, param: 'activeBarcode', out: 'K', row: 2, kind: 'stav', note: '', family: true }, store.get('gsheet', {}));
     view.innerHTML = `<div class="stack-18"><section class="card sheets" id="gsheet">
-      <div class="card-head"><div><p class="eyebrow">Novinka ve verzi 1.3</p><h1>Google tabulka: živé propojení</h1>
-        <p class="hint mt-4">Tabulka řekne Evidenci, které průvodky sleduje, a Evidence do ní sama zapíše každý příjem, export i storno. Do pár sekund, bez obnovování.</p></div></div>
+      <div class="card-head"><div><p class="eyebrow">Novinka ve verzi 1.4: víc tabulek a urgenty</p><h1>Google tabulka: živé propojení</h1>
+        <p class="hint mt-4">Tabulka řekne Evidenci, které průvodky sleduje, a Evidence do ní sama zapíše každý příjem, export i storno. Do pár sekund, bez obnovování. Tabulka s urgenty navíc rozsvítí pracovníkům upozornění. Tabulek jde připojit víc, každá svým skriptem.</p></div></div>
       <div class="gflow" aria-label="Jak propojení funguje">
         <div class="gflow-step"><span class="gflow-ico" aria-hidden="true">▦</span><b>Tabulka</b><small>pošle seznam barcodů ze sloupce <span data-gs="col">${esc(gs.col)}</span></small></div>
         <div class="gflow-arrow" aria-hidden="true"></div>
@@ -1340,12 +1411,18 @@
       </div>
       <h3>1. Kde v tabulce co je</h3>
       <form class="gs-form" autocomplete="off" novalidate>
+        <div class="field gs-kind"><span>Typ tabulky</span><div class="choice">
+          <label><input type="radio" name="kind" value="stav"${gs.kind !== 'urgent' ? ' checked' : ''}><span><b>Stav průvodek</b><small>do tabulky se zapisuje poslední záznam každé průvodky</small></span></label>
+          <label><input type="radio" name="kind" value="urgent"${gs.kind === 'urgent' ? ' checked' : ''}><span><b>⚡ Urgenty</b><small>průvodky z tabulky svítí pracovníkům jako urgent, dokud je z pracoviště neexportují</small></span></label></div></div>
         <label class="field"><span>Název listu <span class="muted">(záložka dole, přesně)</span></span><input class="input" name="list" maxlength="100" value="${esc(gs.list)}" required></label>
         <label class="field"><span>Sloupec s barcodem</span><input class="input mono" name="col" maxlength="3" value="${esc(gs.col)}" required></label>
-        <label class="field"><span>Výsledek do sloupce</span><input class="input mono" name="out" maxlength="3" value="${esc(gs.out)}" required></label>
+        <label class="field"><span>Výsledek do sloupce <span class="muted" data-gs="outopt" hidden>(prázdné = nic)</span></span><input class="input mono" name="out" maxlength="3" value="${esc(gs.out)}"></label>
         <label class="field"><span>První řádek s daty</span><input class="input" name="row" type="number" min="1" max="1000" value="${esc(gs.row)}" required></label>
         <div class="field gs-link"><label class="check"><input type="checkbox" name="link"${gs.link ? ' checked' : ''}> Barcode je v hypertextovém odkazu za parametrem</label>
           <input class="input mono" name="param" maxlength="40" value="${esc(gs.param)}" aria-label="Parametr odkazu"></div>
+        <div class="field gs-note" data-gs="famField"><label class="check"><input type="checkbox" name="family"${gs.family !== false ? ' checked' : ''}> Urgentní jsou i poddíly sestavy</label>
+          <small class="hint">Poddíl se liší jen posledním dvojčíslím ve 2. a 3. části: k sestavě <span class="mono">12345.678901.23456</span> patří i <span class="mono">12345.6789<b>xx</b>.234<b>xx</b></span>.</small></div>
+        <label class="field gs-note" data-gs="noteField"><span>Sloupec s poznámkou k urgentu <span class="muted">(nepovinné, třeba termín nebo zákazník; uvidí ji pracovníci)</span></span><input class="input mono" name="note" maxlength="3" value="${esc(gs.note)}"></label>
       </form>
       <p class="gs-err" role="alert" hidden></p>
       <div class="gs-demo" aria-live="polite"></div>
@@ -1357,7 +1434,7 @@
         <li><b>Rozšíření → Apps Script</b>, smaž, co tam je, vlož skript a ulož (Ctrl+S).</li>
         <li><b>Nasadit → Nové nasazení</b>, typ <b>Webová aplikace</b>. Spustit jako <b>Já</b>, přístup <b>Kdokoli</b>. Po nasazení potvrď oprávnění a zkopíruj <b>adresu webové aplikace</b> (končí <code>/exec</code>).</li>
         <li>Obnov tabulku (F5). Nahoře přibude menu <b>Evidence</b>.</li>
-        <li><b>Evidence → Nastavit API klíč</b>: klíč vytvoříš ve <b>Správa → API klíče</b> (každá tabulka vlastní, ať jde zrušit zvlášť).</li>
+        <li><b>Evidence → Nastavit API klíč</b>: klíč vytvoříš ve <b>Správa → API klíče</b>. Jeden klíč může mít víc tabulek; vlastní klíč pro tabulku se hodí, když ji chceš umět odstřihnout zvlášť.</li>
         <li><b>Evidence → Zapnout živé propojení</b> a vlož adresu z kroku 2. Sloupec se hned doplní a Evidence vyzkouší, že se k tabulce dostane.</li>
       </ol>
       <p class="hint">Stav vidíš ve <b>Správě</b> (a v tabulce: Evidence → Stav propojení). Přístup „Kdokoli“ jen znamená, že adresu jde zavolat; tabulka ale zapíše jen zprávu podepsanou tajným kódem, který zná jen ona a Evidence. Nové odkazy ve sloupci <span data-gs="col">${esc(gs.col)}</span> se začnou sledovat hned po vložení, pro jistotu se celý seznam srovná každou hodinu.</p>
@@ -1413,12 +1490,16 @@
       return {
         list: f.list.value.trim(), col: f.col.value.trim().toUpperCase(), out: f.out.value.trim().toUpperCase(),
         row: Math.trunc(+f.row.value), link: f.link.checked, param: f.param.value.trim(),
+        kind: $('[name=kind]:checked', form).value, note: f.note.value.trim().toUpperCase(), family: f.family.checked,
       };
     }
     function problem(c) {
       if (!c.list) return 'Vyplň název listu (záložka dole v tabulce).';
-      if (!colOk(c.col) || !colOk(c.out)) return 'Sloupec zadej písmenem, např. D nebo AB.';
+      const urgent = c.kind === 'urgent';
+      if (!colOk(c.col) || (c.out && !colOk(c.out)) || (urgent && c.note && !colOk(c.note))) return 'Sloupec zadej písmenem, např. D nebo AB.';
+      if (!urgent && !c.out) return 'Vyplň, do kterého sloupce se zapíše poslední záznam.';
       if (c.col === c.out) return 'Výsledek musí jít do jiného sloupce, než je barcode.';
+      if (urgent && c.note && (c.note === c.col || c.note === c.out)) return 'Poznámka musí být v jiném sloupci než barcode a výsledek.';
       if (!(c.row >= 1 && c.row <= 1000)) return 'První řádek s daty: číslo od 1 do 1000.';
       if (c.link && !/^[A-Za-z0-9_.-]{1,40}$/.test(c.param)) return 'Parametr odkazu: písmena, číslice, tečka, pomlčka nebo podtržítko (např. activeBarcode).';
       return '';
@@ -1429,6 +1510,10 @@
       const errBox = $('.gs-err', view);
       errBox.hidden = !err; errBox.textContent = err;
       $('[name=param]', form).disabled = !c.link;
+      const urgent = c.kind === 'urgent';
+      $('[data-gs=noteField]', view).hidden = !urgent;
+      $('[data-gs=famField]', view).hidden = !urgent;
+      $('[data-gs=outopt]', view).hidden = !urgent;
       $$('[data-gs=col]', view).forEach(x => { x.textContent = c.col || '?'; });
       $$('[data-gs=out]', view).forEach(x => { x.textContent = c.out || '?'; });
       const dept = (ST.depts.find(d => d.code === 'hala') || ST.depts[0]).name;
@@ -1437,7 +1522,10 @@
           ? `<span class="gs-url">http://…/detail/10001?${esc(c.param || '?')}=<mark>${demoCode}</mark>&amp;…</span>`
           : `<mark>${demoCode}</mark>`}</div>
           <div class="gflow-arrow" aria-hidden="true"></div>
-          <div class="gs-cell out"><small>${esc(c.out || '?')}${c.row || ''}</small>Příjem na pracoviště · ${esc(dept)} · pozice R3 · 21. 10. 2026 14:05 · Jan Novák</div></div>`;
+          ${urgent && !c.out
+            ? `<div class="gs-cell out urgent-demo"><small>Evidence, pracoviště ${esc(dept)}</small>⚡ Urgent na pracovišti ${esc(dept)}: <b>${demoCode}</b>, pozice R3</div></div>`
+            : `<div class="gs-cell out"><small>${esc(c.out || '?')}${c.row || ''}</small>Příjem na pracoviště · ${esc(dept)} · pozice R3 · 21. 10. 2026 14:05 · Jan Novák</div></div>
+          ${urgent ? `<p class="hint mt-10">A pracovníkům na pracovišti ${esc(dept)} svítí ⚡ Urgent, dokud průvodku neexportují.</p>` : ''}`}`;
       $('[data-gscopy]', view).disabled = !!err || !template;
       if (err || !template) return;
       store.set('gsheet', c);
@@ -1448,8 +1536,11 @@
         `  list: ${q(c.list)},`.padEnd(52) + ' // název listu (záložka dole)',
         `  sloupecBarcode: ${q(c.col)},`.padEnd(52) + ' // sloupec s barcodem nebo s odkazem',
         `  parametrOdkazu: ${q(c.link ? c.param : '')},`.padEnd(52) + (c.link ? ` // barcode je v odkazu za „${c.param}=“` : ' // barcode je přímo text buňky'),
-        `  sloupecVysledek: ${q(c.out)},`.padEnd(52) + ' // sem se zapíše poslední záznam',
+        `  sloupecVysledek: ${q(c.out)},`.padEnd(52) + (c.out ? ' // sem se zapíše poslední záznam' : ' // nic se nezapisuje'),
         `  prvniRadek: ${c.row},`.padEnd(52) + ' // první řádek s daty',
+        `  typ: ${q(urgent ? 'urgent' : 'stav')},`.padEnd(52) + (urgent ? ' // průvodky v tabulce jsou urgentní' : ' // stav průvodek'),
+        `  sloupecPoznamka: ${q(urgent ? c.note : '')},`.padEnd(52) + (urgent && c.note ? ' // poznámka k urgentu (uvidí ji pracovníci)' : ' // bez poznámky'),
+        `  podDily: ${urgent && c.family ? 'true' : 'false'},`.padEnd(52) + (urgent && c.family ? ' // urgentní jsou i poddíly sestavy (…xx.…xx)' : ' // jen přesná shoda'),
         '};', '// </nastaveni>'].join('\n');
       script = template.replace(/\/\/ <nastaveni>[\s\S]*?\/\/ <\/nastaveni>/, block);
       $('#gsCode', view).textContent = script;

@@ -69,6 +69,8 @@ Bez přepisu cest na serveru jde i `api/v1/index.php?endpoint=last&barcode=…`.
 ## Živé propojení (`watch`, od verze 1.3)
 
 Je určené pro Google tabulku; hotový skript vygeneruje aplikace (API pro IT → Google tabulka).
+Od verze 1.4 jde na jeden klíč připojit víc tabulek (nejvýš 20), rozlišených polem `ref`, a tabulka
+může být typu `urgent`.
 Příjemce musí být webová aplikace Google Apps Script (`https://script.google.com/macros/s/…/exec`,
 u Google Workspace i `…/a/macros/<doména>/s/…/exec`). Jiné adresy server odmítne, aby neposílal
 data jinam. Jeden API klíč = jedno propojení.
@@ -80,6 +82,14 @@ POST api/v1/watch
 ```
 
 - `barcodes` (nejvýš 10 000) nahradí předchozí seznam. Prázdné a příliš dlouhé se přeskočí (`skipped`).
+- `ref` (od 1.4): stálé označení tabulky (skript posílá ID tabulky a listu). Bez `ref` = jedna tabulka
+  na klíč jako ve verzi 1.3. `name`: název pro Správu.
+- `kind` (od 1.4): `status` (výchozí, stav průvodek) nebo `urgent` (průvodky jsou urgentní: na pracovišti,
+  kde leží, svítí pracovníkům upozornění, dokud odtamtud neodejdou exportem). `notes`: objekt
+  `{"barcode": "poznámka"}` k urgentům. `family: true`: urgentní jsou i poddíly sestavy (liší se jen
+  posledním dvojčíslím ve 2. a 3. části: `12345.678901.23456` → `12345.6789xx.234xx`).
+- `GET watch?ref=…` a `DELETE watch?ref=…` platí pro jednu tabulku; bez `ref` pro všechny tabulky klíče
+  (`sheets` v odpovědi GET).
 - Odpověď: `watching`, `found` a `results` = poslední záznamy nalezených průvodek
   (`barcode`, `found`, `text` = jeden řádek pro buňku, `record` jako u `last`).
 - `ping: true`: server hned pošle zkušební zprávu a vrátí `ping: {"ok": …, "error": …}`.
@@ -112,6 +122,7 @@ Odpověď je vždy JSON v UTF-8. Chyba má `error` (kód) a `message` (česky).
 | 401 | `unauthorized` | chybí klíč, je neplatný nebo zrušený |
 | 403 | `https_required` | požadavek přišel bez HTTPS |
 | 404 | `not_found` | průvodka v evidenci není (u `last` i `"found": false`), nebo neznámý endpoint |
+| 409 | `too_many_sheets` | na klíč je připojeno už 20 tabulek |
 | 405 | `method_not_allowed` | metoda, kterou endpoint nepodporuje (`watch` bere i DELETE) |
 | 429 | `too_many_attempts` | víc než 60 požadavků s neplatným klíčem za čtvrt hodiny z jedné adresy |
 

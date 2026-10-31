@@ -131,6 +131,24 @@ Apps Script, nasazení jako webová aplikace (spustit jako Já, přístup Kdokol
   (`/etc/cron.d/evidence_toku_dilu`, založí ho instalace). Server se musí dostat na
   `https://script.google.com`; instalace na to upozorní.
 
+### Víc tabulek a urgenty (od verze 1.4)
+
+- **Víc tabulek:** každá tabulka má vlastní skript (a vlastní webovou aplikaci), API klíč může být
+  společný. Evidence je rozliší podle tabulky a listu. Ve Správě je každá zvlášť.
+- **Tabulka s urgenty:** v generátoru zvol typ **Urgenty**. Průvodky ze sloupce s barcodem jsou
+  urgentní, volitelně s poznámkou (sloupec, třeba termín nebo zákazník).
+  - Když urgentní průvodka leží na pracovišti (poslední záznam je příjem tam), pracovníkům na tom
+    pracovišti svítí nahoře výrazný červený pás **Urgent na pracovišti** (s pozicí, kdy a kdo ji
+    přijal, a poznámkou). Svítí na všech záložkách, **dokud ji z pracoviště neexportují**.
+  - Nový urgent na pracovišti zazvoní a ukáže upozornění. Příjem i export urgentu se ve výsledku
+    skenu označí ⚡ URGENT. Výběr oddělení ukazuje počet urgentů na každém pracovišti, záložka
+    **Na pracovištích** má přehled všech urgentů (kde jsou, nebo že ještě nikde nebyly).
+  - **Poddíly sestavy:** volba „Urgentní jsou i poddíly sestavy“ (výchozí zapnutá). Poddíl se od
+    sestavy liší jen posledním dvojčíslím ve 2. a 3. části čísla: k urgentní sestavě
+    `12345.678901.23456` patří i `12345.6789xx.234xx`. Pracovník vidí „poddíl sestavy …“.
+  - Urgent smazaný z tabulky přestane svítit, jakmile tabulka pošle nový seznam (po úpravě ve
+    sloupci hned, jinak do hodiny).
+
 ## Instalace a aktualizace (Ubuntu + Apache)
 
 ```bash

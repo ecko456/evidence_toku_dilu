@@ -9,9 +9,9 @@ declare(strict_types=1);
  * Časy jsou v databázi jako unixové sekundy (UTC), ven jdou v pražském čase (ISO 8601).
  */
 
-const ETD_VERSION = '1.3.4';
+const ETD_VERSION = '1.4';
 /** Verze schématu databáze (PRAGMA user_version). Novou verzi doplň do etd_migrate(). */
-const ETD_SCHEMA = 3;
+const ETD_SCHEMA = 4;
 /** Zapisovat smí jen stránka aspoň téhle verze (hlavička X-Etd-Client), viz etd_require_client(). */
 const ETD_MIN_CLIENT = 1;
 const ETD_SESSION_COOKIE = 'etd_session';
@@ -91,6 +91,9 @@ function etd_migrate(PDO $pdo): void
     if ((int)$pdo->query('PRAGMA user_version')->fetchColumn() >= ETD_SCHEMA) {
         return;
     }
+    // Přestavba tabulky (schéma 4) nesmí kaskádově smazat navázané řádky: cizí klíče se na dobu
+    // aktualizace vypnou (jde jen mimo transakci) a po ní se zkontrolují a zapnou.
+    $pdo->exec('PRAGMA foreign_keys = OFF');
     $pdo->exec('BEGIN IMMEDIATE');
     try {
         $version = (int)$pdo->query('PRAGMA user_version')->fetchColumn();
@@ -224,13 +227,57 @@ CREATE TABLE IF NOT EXISTS meta (
 ) WITHOUT ROWID;
 SQL);
         }
-        // Další verze schématu sem: if ($version < 4) { … }
+        if ($version < 4) {
+            // 1.4: víc tabulek na jeden API klíč (propojení = klíč + ref, tj. tabulka a list v Googlu;
+            // starší skripty ref neposílají = '' = jedno propojení na klíč jako dřív),
+            // typ tabulky (status = zapisuje poslední záznam, urgent = urgentní průvodky), její název
+            // poznámka k průvodce a u urgentů volba „i poddíly sestavy“. SQLite neumí odebrat UNIQUE, proto přestavba podle návodu SQLite
+            // (nová tabulka, kopie všech řádků, výměna); id zůstávají, sledované průvodky i fronta také.
+            $pdo->exec(<<<'SQL'
+CREATE TABLE hooks_v4 (
+    id INTEGER PRIMARY KEY,
+    api_key_id INTEGER NOT NULL REFERENCES api_keys(id),
+    url TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'status',
+    name TEXT NOT NULL DEFAULT '',
+    ref TEXT NOT NULL DEFAULT '',
+    match_family INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    watch_count INTEGER NOT NULL DEFAULT 0,
+    sent_count INTEGER NOT NULL DEFAULT 0,
+    last_ok_at INTEGER,
+    last_error TEXT,
+    last_error_at INTEGER,
+    fails INTEGER NOT NULL DEFAULT 0,
+    retry_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (api_key_id, ref)
+);
+INSERT INTO hooks_v4 (id, api_key_id, url, secret, active, watch_count, sent_count, last_ok_at, last_error, last_error_at, fails, retry_at, created_at, updated_at)
+    SELECT id, api_key_id, url, secret, active, watch_count, sent_count, last_ok_at, last_error, last_error_at, fails, retry_at, created_at, updated_at FROM hooks;
+DROP TABLE hooks;
+ALTER TABLE hooks_v4 RENAME TO hooks;
+CREATE INDEX IF NOT EXISTS idx_hooks_kind ON hooks(kind, active);
+SQL);
+            $columns = array_column($pdo->query('PRAGMA table_info(hook_watch)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+            if (!in_array('note', $columns, true)) {
+                $pdo->exec('ALTER TABLE hook_watch ADD COLUMN note TEXT');
+            }
+            if ($pdo->query('PRAGMA foreign_key_check')->fetch() !== false) {
+                throw new RuntimeException('Kontrola cizích klíčů po aktualizaci databáze selhala.');
+            }
+        }
+        // Další verze schématu sem: if ($version < 5) { … }
         $pdo->exec('PRAGMA user_version = ' . ETD_SCHEMA);
         $pdo->exec('COMMIT');
     } catch (Throwable $error) {
         $pdo->exec('ROLLBACK');
+        $pdo->exec('PRAGMA foreign_keys = ON');
         throw $error;
     }
+    $pdo->exec('PRAGMA foreign_keys = ON');
 }
 
 /**
