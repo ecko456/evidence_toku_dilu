@@ -73,8 +73,10 @@ function etdZapnout() {
   if (r.getSelectedButton() !== ui.Button.OK) return;
   const typed = r.getResponseText().trim();
   if (typed) url = typed;
+  // bez ?…, #… a /u/0/ (přidá ho Google, když je v prohlížeči víc účtů)
+  url = url.replace(/[?#].*$/, '').replace(/\/u\/\d+(?=\/)/, '').replace(/\/+$/, '');
   if (!/^https?:\/\/\S+\/exec$/.test(url)) {
-    ui.alert('Adresa musí končit /exec. Najdeš ji v Apps Scriptu: Nasadit → Spravovat nasazení → Webová aplikace.');
+    ui.alert('Tohle není adresa webové aplikace:\n' + url + '\n\nV Apps Scriptu: Nasadit → Spravovat nasazení → u nasazení typu Webová aplikace zkopíruj „Adresa URL“. Začíná https://script.google.com/macros/s/ a končí /exec.');
     return;
   }
   props.setProperty('ETD_WEBAPP', url);

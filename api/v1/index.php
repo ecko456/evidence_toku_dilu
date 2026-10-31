@@ -124,11 +124,14 @@ switch ($endpoint) {
             etd_api_error('method_not_allowed', 'Použij GET (stav), POST (seznam barcodů) nebo DELETE (vypnutí).', 405);
         }
         $input = etd_input();
-        $url = trim((string)($input['url'] ?? ''));
+        $url = etd_hook_url_normalize((string)($input['url'] ?? ''));
         $secret = (string)($input['secret'] ?? '');
         $codes = $input['barcodes'] ?? null;
         if (!etd_hook_url_valid($url)) {
-            etd_api_error('bad_request', 'Adresa musí být webová aplikace Google Apps Script (https://script.google.com/macros/s/…/exec).', 400);
+            $shown = mb_substr((string)preg_replace('#/s/([A-Za-z0-9_-]{6})[A-Za-z0-9_-]{8,}#', '/s/$1…', $url), 0, 120);
+            $hint = str_ends_with($url, '/dev') ? ' Tohle je testovací adresa (/dev); potřebná je adresa nasazení, končí /exec.'
+                : (str_contains($url, '/projects/') || str_contains($url, '/home/') ? ' Tohle je adresa editoru skriptu; potřebná je adresa webové aplikace z Nasadit → Spravovat nasazení.' : '');
+            etd_api_error('bad_request', 'Adresa musí být webová aplikace Google Apps Script (https://script.google.com/macros/s/…/exec). Přišlo: „' . ($shown === '' ? 'nic' : $shown) . '“.' . $hint, 400);
         }
         if (!preg_match('/^[A-Za-z0-9_-]{32,128}$/', $secret)) {
             etd_api_error('bad_request', 'Tajný kód musí mít 32 až 128 znaků (písmena, číslice, - a _).', 400);

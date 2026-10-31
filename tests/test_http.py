@@ -613,8 +613,8 @@ class WatchApiTests(Base):
         good = {"url": self.URL, "secret": self.SECRET, "barcodes": ["12345.1.1"]}
         cases = [
             dict(good, url="https://example.com/macros/s/AKfycbx1234567890abcdefghijXYZ/exec"),
-            dict(good, url="http://script.google.com/macros/s/AKfycbx1234567890abcdefghijXYZ/exec"),
-            dict(good, url="https://script.google.com/macros/s/AKfycbx1234567890abcdefghijXYZ/exec?x=1"),
+            dict(good, url="https://script.google.com.example.com/macros/s/AKfycbx1234567890abcdefghijXYZ/exec"),
+            dict(good, url="https://script.google.com/macros/s/AKfycbx1234567890abcdefghijXYZ/exec/../x/exec"),
             dict(good, secret="kratky"),
             dict(good, barcodes="12345.1.1"),
             dict(good, barcodes=["x"] * 10001),
@@ -633,6 +633,17 @@ class WatchApiTests(Base):
         self.assertEqual((status, data["connected"]), (200, False))
         status, data = self.watch(dict(good, url="https://script.google.com/a/macros/firma.cz/s/AKfycbx1234567890abcdefghijXYZ/exec"))
         self.assertEqual(status, 200, "firemní adresa Workspace")
+        # adresa zkopírovaná s /u/1/ (víc účtů v prohlížeči), mezerami a ?… se srovná
+        status, data = self.watch(dict(good, url=" https://script.google.com/macros/u/1/s/AKfycbx1234567890abcdefghijXYZ/exec?usp=sharing\n"))
+        self.assertEqual(status, 200, data)
+        with self.server.db() as db:
+            self.assertEqual(db.execute("SELECT url FROM hooks").fetchone()[0], self.URL)
+        status, data = self.watch(dict(good, url="https://script.google.com/macros/s/AKfycbx1234567890abcdefghijXYZ/dev"))
+        self.assertEqual(status, 400)
+        self.assertIn("Přišlo: „https://script.google.com/macros/s/AKfycb…/dev“", data["message"])
+        self.assertIn("/dev", data["message"])
+        status, data = self.watch(dict(good, url="https://script.google.com/home/projects/1abc/edit"))
+        self.assertIn("adresa editoru", data["message"])
 
     def test_register_queue_and_unregister(self):
         self.URL = f"http://127.0.0.1:{free_port()}/macros/s/zavreny/exec"   # „Google“, který neodpovídá

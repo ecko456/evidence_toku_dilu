@@ -22,6 +22,20 @@ const ETD_HOOK_MAX_RESPONSE = 1048576;
 const ETD_HOOK_RETRY_MAX = 900;       // nejdelší pauza mezi pokusy, když tabulka neodpovídá
 const ETD_WORKER_SECONDS = 55;        // jeden běh úlohy z cronu (cron ji pouští každou minutu)
 
+/**
+ * Adresa, jak ji uživatel zkopíroval, do základního tvaru: bez mezer, bez ?… a #…, bez /u/0/
+ * (Google ho přidá, když je v prohlížeči přihlášeno víc účtů) a /dev → /exec není (dev jde jen vlastníkovi).
+ */
+function etd_hook_url_normalize(string $url): string
+{
+    $url = trim($url);
+    $url = (string)preg_replace('/[?#].*$/s', '', $url);
+    $url = (string)preg_replace('#^http://script\.google\.com/#i', 'https://script.google.com/', $url);
+    $url = (string)preg_replace('#^https://script\.google\.com/#i', 'https://script.google.com/', $url);
+    $url = (string)preg_replace('#/u/\d+(?=/)#', '', $url);
+    return rtrim($url, '/');
+}
+
 /** Adresa webové aplikace Apps Script (i firemní …/a/macros/<doména>/s/…/exec). */
 function etd_hook_url_valid(string $url): bool
 {

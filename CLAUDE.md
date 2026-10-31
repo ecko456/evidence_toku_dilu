@@ -13,7 +13,11 @@ Po každé větší práci **aktualizuj sekci „Kde jsme skončili“**.
 
 ## Kde jsme skončili
 
-Stav k 31. 10. 2026, verze **1.3.1** (schéma databáze 3):
+Stav k 31. 10. 2026, verze **1.3.2** (schéma databáze 3):
+
+- 1.3.2: server odmítl adresu webové aplikace. `etd_hook_url_normalize` (a stejně skript) odstraní
+  `/u/0/` (Google ho přidá při víc účtech v prohlížeči), `?…`, `#…`, mezery; chyba 400 teď ukáže,
+  co přišlo (ID zkrácené), a poradí u `/dev` a u adresy editoru (`/home/projects/…`).
 
 - 1.3.1: uživateli skript hlásil „List „List1“ v tabulce není“: česká Google tabulka má první
   list **„List 1“** (s mezerou). Výchozí název v generátoru je teď „List 1“, `etdList` najde list
