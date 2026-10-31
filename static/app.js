@@ -133,7 +133,7 @@
   }
 
   /** Údaje k průvodce z Google tabulky Stav průvodek: objednávka, EAN, EAN sestavy, index a odkaz. */
-  const INFO_FIELDS = [['order', 'Objednávka'], ['ean', 'EAN'], ['eanAssembly', 'EAN sestavy'], ['index', 'Index']];
+  const INFO_FIELDS = [['order', 'Objednávka'], ['ean', 'EAN dílu'], ['eanAssembly', 'EAN sestavy'], ['index', 'Index']];
   function partInfo(info, compact) {
     if (!info) return '';
     const fields = (compact ? INFO_FIELDS.filter(([k]) => k === 'order' || k === 'index') : INFO_FIELDS).filter(([k]) => info[k]);
@@ -1429,7 +1429,7 @@
       },
     };
     const pre = (text) => `<div class="pre"><pre>${esc(text)}</pre><button class="btn small copy" type="button" data-copy>Kopírovat</button></div>`;
-    const gs = Object.assign({ list: 'List 1', col: 'D', link: true, param: 'activeBarcode', out: 'K', row: 2, kind: 'stav', note: '', family: true, iOrder: '', iAsm: '', iIndex: '', iEan: true }, store.get('gsheet', {}));
+    const gs = Object.assign({ list: 'List 1', col: 'D', link: true, param: 'activeBarcode', out: 'K', row: 2, kind: 'stav', note: '', family: true, iOrder: '', iAsm: '', iIndex: '' }, store.get('gsheet', {}));
     view.innerHTML = `<div class="stack-18"><section class="card sheets" id="gsheet">
       <div class="card-head"><div><p class="eyebrow">Novinka ve verzi 1.4: víc tabulek a urgenty</p><h1>Google tabulka: živé propojení</h1>
         <p class="hint mt-4">Tabulka řekne Evidenci, které průvodky sleduje, a Evidence do ní sama zapíše každý příjem, export i storno. Do pár sekund, bez obnovování. Tabulka s urgenty navíc rozsvítí pracovníkům upozornění. Tabulek jde připojit víc, každá svým skriptem.</p></div></div>
@@ -1446,18 +1446,18 @@
           <label><input type="radio" name="kind" value="stav"${gs.kind !== 'urgent' ? ' checked' : ''}><span><b>Stav průvodek</b><small>do tabulky se zapisuje poslední záznam každé průvodky</small></span></label>
           <label><input type="radio" name="kind" value="urgent"${gs.kind === 'urgent' ? ' checked' : ''}><span><b>⚡ Urgenty</b><small>průvodky z tabulky svítí pracovníkům jako urgent, dokud je z pracoviště neexportují</small></span></label></div></div>
         <label class="field"><span>Název listu <span class="muted">(záložka dole, přesně)</span></span><input class="input" name="list" maxlength="100" value="${esc(gs.list)}" required></label>
-        <label class="field"><span>Sloupec s barcodem</span><input class="input mono" name="col" maxlength="3" value="${esc(gs.col)}" required></label>
+        <label class="field"><span>Sloupec s EAN dílu <span class="muted">(s odkazem)</span></span><input class="input mono" name="col" maxlength="3" value="${esc(gs.col)}" required></label>
         <label class="field"><span>Výsledek do sloupce <span class="muted" data-gs="outopt" hidden>(prázdné = nic)</span></span><input class="input mono" name="out" maxlength="3" value="${esc(gs.out)}"></label>
         <label class="field"><span>První řádek s daty</span><input class="input" name="row" type="number" min="1" max="1000" value="${esc(gs.row)}" required></label>
         <div class="field gs-link"><label class="check"><input type="checkbox" name="link"${gs.link ? ' checked' : ''}> Barcode je v hypertextovém odkazu za parametrem</label>
           <input class="input mono" name="param" maxlength="40" value="${esc(gs.param)}" aria-label="Parametr odkazu"></div>
         <div class="field gs-note" data-gs="famField"><label class="check"><input type="checkbox" name="family"${gs.family !== false ? ' checked' : ''}> Urgentní jsou i poddíly sestavy</label>
           <small class="hint">Poddíl se liší jen posledním dvojčíslím ve 2. a 3. části: k sestavě <span class="mono">12345.678901.23456</span> patří i <span class="mono">12345.6789<b>xx</b>.234<b>xx</b></span>.</small></div>
-        <fieldset class="gs-info"><legend>Údaje k průvodce <span class="muted">(nepovinné; Evidence je ukáže u průvodky i s odkazem z buňky s barcodem)</span></legend>
+        <fieldset class="gs-info" data-gs="infoField"><legend>Údaje k průvodce <span class="muted">(nepovinné; Evidence je ukáže u průvodky spolu s EAN dílu a odkazem z buňky s barcodem)</span></legend>
           <label class="field"><span>Číslo objednávky</span><input class="input mono" name="iOrder" maxlength="3" value="${esc(gs.iOrder)}" placeholder="sloupec"></label>
           <label class="field"><span>EAN sestavy</span><input class="input mono" name="iAsm" maxlength="3" value="${esc(gs.iAsm)}" placeholder="sloupec"></label>
           <label class="field"><span>Index</span><input class="input mono" name="iIndex" maxlength="3" value="${esc(gs.iIndex)}" placeholder="sloupec"></label>
-          <label class="check gs-ean"><input type="checkbox" name="iEan"${gs.iEan !== false ? ' checked' : ''}> Text buňky s odkazem je EAN</label>
+          <p class="hint gs-ean">Sloupec s barcodem je EAN dílu: text buňky = EAN dílu, její hypertextový odkaz = barcode a proklik v aplikaci.</p>
         </fieldset>
         <label class="field gs-note" data-gs="noteField"><span>Sloupec s poznámkou k urgentu <span class="muted">(nepovinné, třeba termín nebo zákazník; uvidí ji pracovníci)</span></span><input class="input mono" name="note" maxlength="3" value="${esc(gs.note)}"></label>
       </form>
@@ -1528,7 +1528,7 @@
         list: f.list.value.trim(), col: f.col.value.trim().toUpperCase(), out: f.out.value.trim().toUpperCase(),
         row: Math.trunc(+f.row.value), link: f.link.checked, param: f.param.value.trim(),
         kind: $('[name=kind]:checked', form).value, note: f.note.value.trim().toUpperCase(), family: f.family.checked,
-        iOrder: f.iOrder.value.trim().toUpperCase(), iAsm: f.iAsm.value.trim().toUpperCase(), iIndex: f.iIndex.value.trim().toUpperCase(), iEan: f.iEan.checked,
+        iOrder: f.iOrder.value.trim().toUpperCase(), iAsm: f.iAsm.value.trim().toUpperCase(), iIndex: f.iIndex.value.trim().toUpperCase(),
       };
     }
     function problem(c) {
@@ -1553,6 +1553,7 @@
       const urgent = c.kind === 'urgent';
       $('[data-gs=noteField]', view).hidden = !urgent;
       $('[data-gs=famField]', view).hidden = !urgent;
+      $('[data-gs=infoField]', view).hidden = urgent;   // u urgentů může být v buňce EAN vrcholné sestavy: údaje jen ze Stavu průvodek
       $('[data-gs=outopt]', view).hidden = !urgent;
       $$('[data-gs=col]', view).forEach(x => { x.textContent = c.col || '?'; });
       $$('[data-gs=out]', view).forEach(x => { x.textContent = c.out || '?'; });
@@ -1581,10 +1582,9 @@
         `  typ: ${q(urgent ? 'urgent' : 'stav')},`.padEnd(52) + (urgent ? ' // průvodky v tabulce jsou urgentní' : ' // stav průvodek'),
         `  sloupecPoznamka: ${q(urgent ? c.note : '')},`.padEnd(52) + (urgent && c.note ? ' // poznámka k urgentu (uvidí ji pracovníci)' : ' // bez poznámky'),
         `  podDily: ${urgent && c.family ? 'true' : 'false'},`.padEnd(52) + (urgent && c.family ? ' // urgentní jsou i poddíly sestavy (…xx.…xx)' : ' // jen přesná shoda'),
-        `  sloupecObjednavka: ${q(c.iOrder)},`.padEnd(52) + ' // údaje k průvodce: číslo objednávky',
-        `  sloupecEanSestavy: ${q(c.iAsm)},`.padEnd(52) + ' // EAN sestavy',
-        `  sloupecIndex: ${q(c.iIndex)},`.padEnd(52) + ' // index',
-        `  textJeEan: ${c.iEan ? 'true' : 'false'},`.padEnd(52) + (c.iEan ? ' // text buňky s odkazem je EAN' : ' // text buňky s odkazem se neposílá'),
+        `  sloupecObjednavka: ${q(urgent ? '' : c.iOrder)},`.padEnd(52) + ' // údaje k průvodce (jen Stav průvodek): číslo objednávky',
+        `  sloupecEanSestavy: ${q(urgent ? '' : c.iAsm)},`.padEnd(52) + ' // EAN sestavy (EAN dílu = text buňky s barcodem)',
+        `  sloupecIndex: ${q(urgent ? '' : c.iIndex)},`.padEnd(52) + ' // index',
         '};', '// </nastaveni>'].join('\n');
       script = template.replace(/\/\/ <nastaveni>[\s\S]*?\/\/ <\/nastaveni>/, block);
       $('#gsCode', view).textContent = script;

@@ -1,5 +1,5 @@
 /**
- * Evidence toku dílů → Google tabulka: živé propojení (verze 1.5)
+ * Evidence toku dílů → Google tabulka: živé propojení (verze 1.5.1)
  *
  * Skript najde ve sloupci s barcody (nebo s odkazy, ve kterých je barcode) průvodky, pošle jejich
  * seznam do Evidence a do výsledkového sloupce zapíše poslední záznam. Když pak někdo průvodku
@@ -18,17 +18,16 @@
 const ETD = {
   api: 'https://SERVER/evidence_toku_dilu/api/v1/', // adresa API Evidence
   list: 'List 1',                                   // název listu (záložka dole)
-  sloupecBarcode: 'D',                              // sloupec s barcodem nebo s odkazem
+  sloupecBarcode: 'D',                              // sloupec s EAN dílu: text = EAN dílu, hypertextový odkaz = barcode
   parametrOdkazu: 'activeBarcode',                  // barcode je v odkazu za „activeBarcode=“; '' = barcode je přímo text buňky
   sloupecVysledek: 'K',                             // sem se zapíše poslední záznam; '' = nic nezapisovat
   prvniRadek: 2,                                    // řádek 1 je záhlaví
   typ: 'stav',                                      // 'stav' = stav průvodek, 'urgent' = průvodky v tabulce jsou urgentní
   sloupecPoznamka: '',                              // u urgentů: sloupec s poznámkou (zobrazí se pracovníkům); '' = bez poznámky
   podDily: true,                                    // u urgentů: urgentní jsou i poddíly sestavy (12345.6789xx.234xx)
-  sloupecObjednavka: '',                            // údaje k průvodce, které Evidence ukáže (i s odkazem z buňky s barcodem):
-  sloupecEanSestavy: '',                            //   číslo objednávky, EAN sestavy, index; '' = sloupec nepoužívat
-  sloupecIndex: '',
-  textJeEan: true,                                  // text buňky s odkazem je EAN (ukáže se jako EAN)
+  sloupecObjednavka: '',                            // jen Stav průvodek: údaje k průvodce, které Evidence ukáže (spolu
+  sloupecEanSestavy: '',                            //   s EAN dílu = text buňky s barcodem a jejím odkazem):
+  sloupecIndex: '',                                 //   číslo objednávky, EAN sestavy, index; '' = sloupec nepoužívat
 };
 // </nastaveni>
 
@@ -240,15 +239,16 @@ function etdSync(ping) {
       sheet.getRange(ETD.prvniRadek, etdSloupec(ETD.sloupecPoznamka), codes.length, 1).getDisplayValues()
         .forEach((r, i) => { const t = String(r[0]).trim(); if (codes[i] && t && !notes[codes[i]]) notes[codes[i]] = t.slice(0, 200); });
     }
-    // údaje k průvodce (Stav průvodek): číslo objednávky, EAN (text buňky s odkazem), EAN sestavy, index, odkaz
+    // údaje k průvodce, jen z tabulky Stav průvodek (v tabulce Urgenty může být EAN vrcholné sestavy):
+    // EAN dílu = text buňky s barcodem, její odkaz, číslo objednávky, EAN sestavy, index
     const info = {};
     const col = c => (c && codes.length ? sheet.getRange(ETD.prvniRadek, etdSloupec(c), codes.length, 1).getDisplayValues().map(r => String(r[0]).trim()) : null);
     const order = col(ETD.sloupecObjednavka), eanAsm = col(ETD.sloupecEanSestavy), index = col(ETD.sloupecIndex);
-    rows.forEach((r, i) => {
+    if (ETD.typ !== 'urgent') rows.forEach((r, i) => {
       if (!r.code || info[r.code]) return;
       const it = {};
       if (r.link) it.link = r.link;
-      if (ETD.textJeEan && r.text && r.text !== r.code) it.ean = r.text;
+      if (r.text) it.ean = r.text;
       if (order && order[i]) it.order = order[i];
       if (eanAsm && eanAsm[i]) it.eanAssembly = eanAsm[i];
       if (index && index[i]) it.index = index[i];

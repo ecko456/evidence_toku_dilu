@@ -147,7 +147,10 @@ function etd_info_clean(mixed $info): ?array
     return $out === [] ? null : $out;
 }
 
-/** Údaje ze všech aktivních tabulek (barcode malými => údaje; první neprázdná hodnota pole vyhrává). */
+/**
+ * Údaje z aktivních tabulek Stav průvodek (barcode malými => údaje; první neprázdná hodnota pole
+ * vyhrává). Tabulky s urgenty se nepoužijí: v buňce může být EAN vrcholné sestavy, ne dílu.
+ */
 function etd_info_index(): array
 {
     static $cache = null;
@@ -156,7 +159,7 @@ function etd_info_index(): array
     }
     $cache = [];
     $rows = etd_all("SELECT w.barcode, w.info FROM hook_watch w JOIN hooks h ON h.id = w.hook_id AND h.active = 1
-        JOIN api_keys k ON k.id = h.api_key_id AND k.revoked_at IS NULL WHERE w.info IS NOT NULL ORDER BY h.kind = 'urgent', h.id");
+        JOIN api_keys k ON k.id = h.api_key_id AND k.revoked_at IS NULL WHERE w.info IS NOT NULL AND h.kind = 'status' ORDER BY h.id");
     foreach ($rows as $row) {
         $info = json_decode((string)$row['info'], true);
         if (is_array($info)) {
@@ -189,7 +192,8 @@ function etd_hook_register(array $key, string $url, string $secret, array $barco
     $ref = etd_text($opts['ref'] ?? '', 200);
     $family = $kind === 'urgent' && !empty($opts['family']) ? 1 : 0;
     $infos = [];
-    foreach ((array)($opts['info'] ?? []) as $code => $info) {
+    // údaje k průvodce bere Evidence jen z tabulek Stav průvodek (viz etd_info_index)
+    foreach ($kind === 'status' ? (array)($opts['info'] ?? []) : [] as $code => $info) {
         if (($clean = etd_info_clean($info)) !== null) {
             $infos[mb_strtolower((string)$code)] = json_encode($clean, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         }

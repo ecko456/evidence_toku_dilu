@@ -154,9 +154,10 @@ Apps Script, nasazení jako webová aplikace (spustit jako Já, přístup Kdokol
 
 ### Údaje k průvodce z tabulky (od verze 1.5)
 
-Tabulka Stav průvodek může k průvodce poslat **číslo objednávky, EAN, EAN sestavy a index**
-a **odkaz** z buňky s barcodem (hypertextový odkaz do IS). V generátoru vyplníš sloupce
-(Údaje k průvodce) a zaškrtneš, že text buňky s odkazem je EAN. Evidence je pak ukáže:
+Sloupec s barcodem je vždy **EAN dílu**: text buňky je EAN dílu a její hypertextový odkaz (do IS)
+nese barcode průvodky. Tabulka **Stav průvodek** k průvodce pošle EAN dílu, odkaz a ze zvolených
+sloupců **číslo objednávky, EAN sestavy a index** (v generátoru: Údaje k průvodce). Tabulka
+**Urgenty** údaje neposílá: v buňce může být EAN vrcholné sestavy, ne dílu. Evidence je ukáže:
 
 - ve výsledku skenu (příjem i export), v okně pro počet kusů, v Přehledu u posledního záznamu
   i ve výsledcích hledání, v Na pracovištích a v pásu urgentů,

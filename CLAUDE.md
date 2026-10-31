@@ -13,7 +13,13 @@ Po každé větší práci **aktualizuj sekci „Kde jsme skončili“**.
 
 ## Kde jsme skončili
 
-Stav k 31. 10. 2026, verze **1.5** (schéma databáze 5):
+Stav k 31. 10. 2026, verze **1.5.1** (schéma databáze 5):
+
+- 1.5.1: „Sloupec s barcodem je EAN (dílu) s odkazem; u tabulky Urgenty to je EAN, nebo EAN
+  vrcholné sestavy, nejde poznat; údaje k průvodce ber z tabulek Stav průvodek“. Text buňky
+  s barcodem se posílá vždy jako `ean` (volba `textJeEan` zrušena), údaje se ukládají a čtou jen
+  z tabulek `kind = 'status'` (skript u urgentů `info` neposílá, server ho i tak zahodí), štítek
+  „EAN dílu“, generátor: „Sloupec s EAN dílu“, část Údaje k průvodce u urgentů skrytá.
 
 - 1.5: „pokud bude shoda v tabulce Stav průvodek, doplní k položce číslo objednávky, EAN, EAN
   sestavy a index; EAN je hypertextový odkaz, ať se jde v aplikaci prokliknout“ a „u urgentní

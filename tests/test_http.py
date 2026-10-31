@@ -872,6 +872,12 @@ class SheetsV14Tests(Base):
         self.assertEqual(sorted((r["barcode"], (r["info"] or {}).get("index")) for r in hala["records"]), [("I-2", None), ("I-3", None), ("JINA", None), ("i-1", "03")])
         status, data = self.watch(self.body(ref="s", info=["seznam"]))
         self.assertEqual(status, 400)
+        # tabulka s urgenty: v buňce může být EAN vrcholné sestavy, údaje k průvodce se z ní neberou
+        self.watch(self.body(ref="u", kind="urgent", barcodes=["I-1", "I-9"], info={"I-1": {"order": "Z-URGENTU", "ean": "999"}, "I-9": {"order": "Z-URGENTU"}}))
+        self.assertEqual(self.admin.get("last", barcode="I-1")[1]["info"]["order"], "OBJ-1")
+        self.assertIsNone(self.admin.get("last", barcode="I-9")[1]["info"])
+        with self.server.db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM hook_watch w JOIN hooks h ON h.id = w.hook_id WHERE h.kind = 'urgent' AND w.info IS NOT NULL").fetchone()[0], 0)
         # odpojená tabulka: údaje zmizí
         self.watch(method="DELETE", query="?ref=s")
         self.assertIsNone(self.admin.get("last", barcode="I-1")[1]["info"])

@@ -65,7 +65,7 @@ const setState = fn => { const s = load(STATE); fn(s); save(STATE, s); };
   assert(/\/\/ <nastaveni>[\s\S]*\/\/ <\/nastaveni>/.test(template), 'šablona má blok nastavení');
   fs.writeFileSync(SCRIPT, template.replace(/\/\/ <nastaveni>[\s\S]*\/\/ <\/nastaveni>/, `// <nastaveni>
 const ETD = { api: '${BASE}/api/v1/', list: 'List1', sloupecBarcode: 'D', parametrOdkazu: 'activeBarcode', sloupecVysledek: 'K', prvniRadek: 2,
-  sloupecObjednavka: 'A', sloupecEanSestavy: 'B', sloupecIndex: 'C', textJeEan: true };
+  sloupecObjednavka: 'A', sloupecEanSestavy: 'B', sloupecIndex: 'C' };
 // </nastaveni>`));
 
   const link = code => `http://is.example/commission.production.detail/default/10001?activeBarcode=${code}&componentProductionId=678901`;
