@@ -13,7 +13,17 @@ Po každé větší práci **aktualizuj sekci „Kde jsme skončili“**.
 
 ## Kde jsme skončili
 
-Stav k 31. 10. 2026, verze **1.5.1** (schéma databáze 5):
+Stav k 31. 10. 2026, verze **1.6** (schéma databáze 5):
+
+- 1.6: „pokud systém dokáže přiřadit číslo objednávky, EAN, index, ať ve vizualizaci upřednostní tyto
+  data a barcode minimalizuje; v přehledu ať jsou vidět a jde podle nich vyhledávat“.
+  - `partTitle(barcode, info)` (seznamy: objednávka · EAN · idx nahoře, klik = Přehled, barcode
+    `.pt-code` malý), `partBig` (výsledek skenu, okno počtu kusů, Přehled), `partExtra` (zbytek:
+    EAN sestavy a odkaz). Bez údajů z tabulky se ukazuje barcode jako dřív. Sloupce „Průvodka“.
+  - Server: `etd_records_for` přidává `info` (recent, records, historie); `etd_family_parts` taky.
+    Hledání (`search`): `etd_info_search` (objednávka/EAN dílu/EAN sestavy obsahuje, od 3 znaků;
+    index přesně); přesná shoda údaje na jednu průvodku = `exact` s `via`, ostatní v `matches`
+    s `matchedBy`.
 
 - 1.5.1: „Sloupec s barcodem je EAN (dílu) s odkazem; u tabulky Urgenty to je EAN, nebo EAN
   vrcholné sestavy, nejde poznat; údaje k průvodce ber z tabulek Stav průvodek“. Text buňky

@@ -126,7 +126,7 @@
     const key = String(current || (list[0] && list[0].barcode) || '').toLowerCase();
     return `<details class="asm${light ? ' light' : ''}" data-asm="${esc(key)}"${asmOpen.has(key) ? ' open' : ''}><summary>${current && list.length < (parts || []).length ? 'Další díly sestavy' : 'Díly sestavy'}: ${num(list.length)}${onsite ? ` · ${num(onsite)} na ${onsite === 1 ? 'pracovišti' : 'pracovištích'}` : ''}</summary>
       <div class="asm-list">${list.map(p => { const l = p.last; const there = l && l.action === 'prijem';
-        return `<div class="asm-row${there ? ' there' : ''}">${codeBtn(p.barcode)}
+        return `<div class="asm-row${there ? ' there' : ''}">${partTitle(p.barcode, p.info)}
           <span>${l ? (there ? deptTag(l.department, l.department_label) : `<span class="muted">${esc(l.action_label)} · ${esc(l.department_label)}</span>`) : '<span class="muted">zatím nikde</span>'}</span>
           <span>${there && l.position ? `pozice <b>${esc(l.position)}</b>` : l && l.quantity != null ? `${num(l.quantity)} ks` : ''}</span>
           <span class="muted small">${l ? esc(agoUnix(l.recorded_at_unix)) : ''}</span></div>`; }).join('')}</div></details>`;
@@ -134,6 +134,26 @@
 
   /** Údaje k průvodce z Google tabulky Stav průvodek: objednávka, EAN, EAN sestavy, index a odkaz. */
   const INFO_FIELDS = [['order', 'Objednávka'], ['ean', 'EAN dílu'], ['eanAssembly', 'EAN sestavy'], ['index', 'Index']];
+  const hasMain = info => !!(info && (info.order || info.ean || info.index));
+  /**
+   * Průvodka v seznamu: když ji Evidence zná z tabulky, nahoře objednávka, EAN dílu a index
+   * (klik = otevřít v Přehledu) a barcode jen malým písmem pod tím; jinak barcode jako dosud.
+   */
+  function partTitle(barcode, info) {
+    if (!hasMain(info)) return codeBtn(barcode);
+    const main = [info.order ? `<b>${esc(info.order)}</b>` : '', info.ean ? `<span><small>EAN</small> ${esc(info.ean)}</span>` : '', info.index ? `<span><small>idx</small> ${esc(info.index)}</span>` : '']
+      .filter(Boolean).join('<i aria-hidden="true">·</i>');
+    return `<span class="pt"><button class="pt-main" type="button" data-find="${esc(barcode)}" title="Barcode ${esc(barcode)}">${main}</button><span class="pt-code">${esc(barcode)}</span></span>`;
+  }
+  /** Totéž velké (výsledek skenu, Přehled, export). */
+  function partBig(barcode, info) {
+    if (!hasMain(info)) return `<div class="code">${esc(barcode)}</div>`;
+    const main = [info.order ? `<span><small>Objednávka</small> <b>${esc(info.order)}</b></span>` : '', info.ean ? `<span><small>EAN dílu</small> <b>${esc(info.ean)}</b></span>` : '',
+      info.index ? `<span><small>Index</small> <b>${esc(info.index)}</b></span>` : ''].filter(Boolean).join('');
+    return `<div class="pt-big"><div class="pt-big-main">${main}</div><div class="pt-code">${esc(barcode)}</div></div>`;
+  }
+  /** Zbytek údajů, když hlavní (objednávka, EAN, index) už ukazuje partTitle/partBig: EAN sestavy a odkaz. */
+  const partExtra = (info, compact) => (info ? partInfo(hasMain(info) ? { eanAssembly: compact ? '' : info.eanAssembly, link: info.link } : info, compact) : '');
   function partInfo(info, compact) {
     if (!info) return '';
     const fields = (compact ? INFO_FIELDS.filter(([k]) => k === 'order' || k === 'index') : INFO_FIELDS).filter(([k]) => info[k]);
@@ -618,11 +638,12 @@
           <span>Svítí, dokud ${items.length === 1 ? 'průvodku' : 'průvodky'} z pracoviště neexportuješ.</span></div>
         <button class="btn small urgent-toggle" type="button" data-utoggle aria-expanded="${urgentOpen}">${urgentOpen ? 'Skrýt seznam' : 'Zobrazit'}</button></div>
         <div class="urgent-list"${urgentOpen ? '' : ' hidden'}>${items.map(u => `<div class="urgent-item${fresh.includes(u.barcode.toLowerCase()) ? ' new' : ''}">
-          ${codeBtn(u.barcode)}${u.of ? `<span class="urgent-of" title="Shoda ${esc(u.mask || '')}">poddíl sestavy ${esc(u.of)}</span>` : ''}<span class="urgent-pos">${u.last && u.last.position ? `pozice <b>${esc(u.last.position)}</b>` : 'bez pozice'}</span>
+          ${partTitle(u.barcode, u.info)}${u.of ? `<span class="urgent-of" title="Shoda ${esc(u.mask || '')}">poddíl sestavy ${esc(u.of)}</span>` : ''}<span class="urgent-pos">${u.last && u.last.position ? `pozice <b>${esc(u.last.position)}</b>` : 'bez pozice'}</span>
           <span class="muted small">${u.last ? `přijato ${esc(agoUnix(u.last.recorded_at_unix))} (${esc(u.last.user)})` : ''}</span>
-          ${u.note ? `<span class="urgent-note">${esc(u.note)}</span>` : ''}${partInfo(u.info, true)}${assemblyParts(u.parts, u.barcode, true)}</div>`).join('')}</div>`;
+          ${u.note ? `<span class="urgent-note">${esc(u.note)}</span>` : ''}${partExtra(u.info, true)}${assemblyParts(u.parts, u.barcode, true)}</div>`).join('')}</div>`;
       $('[data-utoggle]', bar).onclick = () => { urgentOpen = !urgentOpen; store.set('urgentOpen', urgentOpen); urgentShown = null; loadUrgent(); };
-      if (fresh.length) { beep('warn'); toast(`⚡ Nový urgent na pracovišti: ${fresh.length === 1 ? items.find(u => u.barcode.toLowerCase() === fresh[0]).barcode : `${fresh.length} průvodek`}`, 'err', 9000); }
+      if (fresh.length) { beep('warn'); const one = fresh.length === 1 ? items.find(u => u.barcode.toLowerCase() === fresh[0]) : null;
+        toast(`⚡ Nový urgent na pracovišti: ${one ? (one.info && (one.info.order || one.info.ean) ? [one.info.order, one.info.ean && 'EAN ' + one.info.ean].filter(Boolean).join(' · ') : one.barcode) : `${fresh.length} průvodek`}`, 'err', 9000); }
     } else {
       bar.innerHTML = '';
     }
@@ -717,9 +738,9 @@
       return true;
     }
 
-    function showResult(kind, title, lines, code, actions) {
+    function showResult(kind, title, lines, code, actions, info) {
       result.innerHTML = `<div class="result ${kind}"><span class="ico">${kind === 'ok' ? '✓' : kind === 'urgent' ? '⚡' : kind === 'warn' ? '!' : '✕'}</span><div>
-        <h3>${esc(title)}</h3>${code ? `<div class="code">${esc(code)}</div>` : ''}<div class="lines">${lines.map(l => `<span>${l}</span>`).join('')}</div>
+        <h3>${esc(title)}</h3>${code ? partBig(code, info) : ''}<div class="lines">${lines.map(l => `<span>${l}</span>`).join('')}</div>
         ${actions ? `<div class="acts">${actions}</div>` : ''}</div></div>`;
     }
 
@@ -731,14 +752,14 @@
           r.urgent ? `<span class="tag crit">⚡ URGENT</span> ${r.urgent.of ? `Poddíl urgentní sestavy <b>${esc(r.urgent.of)}</b>. ` : ''}${isIn ? 'Svítí na pracovišti, dokud průvodku neexportuješ.' : 'Urgent odešel z pracoviště.'}${r.urgent.note ? ` <b>${esc(r.urgent.note)}</b>` : ''}` : '',
           rec.position ? `Pozice: <b>${esc(rec.position)}</b>` : '', rec.quantity != null ? `Počet: <b>${num(rec.quantity)} ks</b>` : '',
           prev ? `Předtím: ${recLine(prev)} · ${esc(agoUnix(prev.recorded_at_unix))}` : 'První záznam této průvodky.',
-          partInfo(r.info),
-        ].filter(Boolean), rec.barcode, `<span class="muted small">zapsáno ${esc(when(rec.recorded_at))}</span>`);
+          partExtra(r.info),
+        ].filter(Boolean), rec.barcode, `<span class="muted small">zapsáno ${esc(when(rec.recorded_at))}</span>`, r.info);
         beep(r.urgent && isIn ? 'warn' : 'ok');
         if (r.urgent) loadUrgent();
       } else if (r.status === 'duplicate') {
         const l = r.last;
-        showResult('warn', 'Už je zapsáno', [`${recLine(l)} · ${esc(agoUnix(l.recorded_at_unix))} (${esc(l.user)}).`, 'Nejspíš dvojí načtení. Když jde opravdu o další záznam, zapiš ho znovu.', partInfo(r.info)].filter(Boolean),
-          r.barcode, '<button class="btn small" type="button" data-force>Zapsat znovu</button>');
+        showResult('warn', 'Už je zapsáno', [`${recLine(l)} · ${esc(agoUnix(l.recorded_at_unix))} (${esc(l.user)}).`, 'Nejspíš dvojí načtení. Když jde opravdu o další záznam, zapiš ho znovu.', partExtra(r.info)].filter(Boolean),
+          r.barcode, '<button class="btn small" type="button" data-force>Zapsat znovu</button>', r.info);
         $('[data-force]', result).onclick = async () => {
           const data = await send([item], true);
           if (data) { showOne(data.results[0], item); loadRecent(); }
@@ -780,13 +801,17 @@
     function askQty(code) {
       pending = { code };
       qtyPanel.hidden = false;
-      qtyPanel.innerHTML = `<form id="qtyForm" novalidate><p class="eyebrow">Export průvodky</p><div class="code">${esc(code)}</div>
+      qtyPanel.innerHTML = `<form id="qtyForm" novalidate><p class="eyebrow">Export průvodky</p><div id="qtyCode">${partBig(code, partCache.get(code.toLowerCase()))}</div>
         <p class="small muted" id="qtyInfo">Načítám poslední záznam…</p>
         <div class="qty-row"><label for="qtyInput" class="unit">Počet kusů</label><input id="qtyInput" class="qty-input" type="text" inputmode="numeric" autocomplete="off" maxlength="9"><span class="unit">ks</span>
           <button class="btn primary big" type="submit">Zapsat export</button><button class="btn ghost" type="button" data-qcancel>Zrušit (Esc)</button></div></form>`;
       const qf = $('#qtyForm'), qi = $('#qtyInput');
       qi.focus();
-      lastInfo(code).then(l => { const box = $('#qtyInfo'); if (box) box.innerHTML = (l ? `Poslední záznam: ${recLine(l)} · ${esc(agoUnix(l.recorded_at_unix))}` : 'Průvodka zatím nemá žádný záznam.') + (partCache.get(code.toLowerCase()) ? `<br>${partInfo(partCache.get(code.toLowerCase()))}` : ''); });
+      lastInfo(code).then(l => {
+        const box = $('#qtyInfo'), pi = partCache.get(code.toLowerCase());
+        if (box) box.innerHTML = (l ? `Poslední záznam: ${recLine(l)} · ${esc(agoUnix(l.recorded_at_unix))}` : 'Průvodka zatím nemá žádný záznam.') + (pi ? `<br>${partExtra(pi)}` : '');
+        const head = $('#qtyCode'); if (head && pi) head.innerHTML = partBig(code, pi);
+      });
       const cancel = () => { pending = null; qtyPanel.hidden = true; qtyPanel.innerHTML = ''; input.focus(); };
       $('[data-qcancel]', qf).onclick = cancel;
       qi.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); cancel(); } });
@@ -857,6 +882,8 @@
       const i = batch.indexOf(item);
       const cell = $(`[data-info="${i}"]`);
       if (cell) cell.innerHTML = infoHtml(item);
+      const pc = $(`[data-pcode="${i}"]`), pi = partCache.get(item.code.toLowerCase());
+      if (pc && hasMain(pi)) pc.innerHTML = partTitle(item.code, pi);
     }
 
     function renderBatch(flash) {
@@ -866,8 +893,8 @@
       const pos = position();
       batchBox.innerHTML = `<div class="card-head"><h2>${isIn ? 'Načtené průvodky k příjmu' : 'Načtené průvodky k exportu'}<span class="count">${batch.length}</span></h2>
           <div class="row">${batch.length ? '<button class="btn small" type="button" data-bclear>Vyprázdnit seznam</button>' : ''}</div></div>
-        ${batch.length ? `<div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>#</th><th>Barcode</th>${isIn ? '' : '<th class="num">Počet ks</th>'}<th>Poslední záznam</th><th></th></tr></thead><tbody>
-          ${batch.map((x, i) => `<tr class="${x.status ? 'st-' + x.status : ''}${i === flash ? ' flash' : ''}"><td class="muted">${i + 1}</td><td class="code" data-wide>${esc(x.code)}</td>
+        ${batch.length ? `<div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>#</th><th>Průvodka</th>${isIn ? '' : '<th class="num">Počet ks</th>'}<th>Poslední záznam</th><th></th></tr></thead><tbody>
+          ${batch.map((x, i) => `<tr class="${x.status ? 'st-' + x.status : ''}${i === flash ? ' flash' : ''}"><td class="muted">${i + 1}</td><td class="code" data-wide data-pcode="${i}">${partCache.get(x.code.toLowerCase()) ? partTitle(x.code, partCache.get(x.code.toLowerCase())) : esc(x.code)}</td>
             ${isIn ? '' : `<td class="num"><input class="row-qty${x.qtyBad ? ' need' : ''}" type="text" inputmode="numeric" autocomplete="off" maxlength="9" data-q="${i}" value="${esc(x.qty)}" aria-label="Počet kusů pro ${esc(x.code)}"> ks</td>`}
             <td data-info="${i}" data-wide>${infoHtml(x)}</td><td><button class="btn ghost small" type="button" data-bdel="${i}" aria-label="Odebrat ${esc(x.code)}">Odebrat</button></td></tr>`).join('')}
           </tbody></table></div>` : `<p class="empty">Zatím nic. Načti první průvodku čtečkou.</p>`}
@@ -1050,12 +1077,12 @@
   function recordsTable(records, opts = {}) {
     const showDept = opts.dept !== false;
     let lastMarked = false;
-    return `<div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>Kdy</th><th>Barcode</th><th>Záznam</th>${showDept ? '<th>Oddělení</th>' : ''}<th>Pozice / ks</th><th>Kdo</th><th></th></tr></thead><tbody>
+    return `<div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>Kdy</th><th>Průvodka</th><th>Záznam</th>${showDept ? '<th>Oddělení</th>' : ''}<th>Pozice / ks</th><th>Kdo</th><th></th></tr></thead><tbody>
       ${records.map(r => {
         const isLast = opts.markLast && !r.cancelled && !lastMarked; if (isLast) lastMarked = true;
         return `<tr class="${r.cancelled ? 'cancelled' : ''}${isLast ? ' is-last' : ''}">
           <td class="nowrap" title="${esc(fmtFull.format(new Date(r.recorded_at)))}">${esc(when(r.recorded_at))}${isLast ? '<span class="sub"><b>poslední záznam</b></span>' : ''}</td>
-          <td data-wide>${codeBtn(r.barcode)}</td>
+          <td data-wide>${partTitle(r.barcode, r.info)}</td>
           <td>${actTag(r)}${r.cancelled ? `<span class="sub">stornováno ${esc(when(r.cancelled.at))} (${esc(r.cancelled.by)})${r.cancelled.reason ? ': ' + esc(r.cancelled.reason) : ''}</span>` : ''}</td>
           ${showDept ? `<td>${deptTag(r.department, r.department_label)}</td>` : ''}
           <td class="strike">${r.position ? `pozice <b>${esc(r.position)}</b>` : ''}${r.quantity != null ? `<b>${num(r.quantity)} ks</b>` : ''}${!r.position && r.quantity == null ? '<span class="muted">—</span>' : ''}</td>
@@ -1081,9 +1108,9 @@
   function overviewView(view) {
     const filters = { dept: '', type: '', ...store.get('filters', {}) };
     view.innerHTML = `<section class="card">
-        <div class="card-head"><div><h1>Přehled</h1><p class="hint mt-4">Vyhledej průvodku podle barcodu. Záznamy jsou od nejnovějšího, nahoře je vždy poslední záznam.</p></div></div>
+        <div class="card-head"><div><h1>Přehled</h1><p class="hint mt-4">Vyhledej průvodku podle barcodu, čísla objednávky, EAN dílu, EAN sestavy nebo indexu (údaje z tabulky Stav průvodek). Záznamy jsou od nejnovějšího, nahoře je vždy poslední záznam.</p></div></div>
         <form class="search-row" id="searchForm" role="search" autocomplete="off" novalidate>
-          <input id="searchInput" class="scan-input" type="search" placeholder="Vyhledat barcode (načti čtečkou nebo napiš část)" autocapitalize="off" spellcheck="false" maxlength="${ST.limits.barcode + 20}" aria-label="Vyhledat barcode">
+          <input id="searchInput" class="scan-input" type="search" placeholder="Barcode, objednávka, EAN nebo index (čtečkou nebo napiš část)" autocapitalize="off" spellcheck="false" maxlength="${ST.limits.barcode + 20}" aria-label="Vyhledat průvodku">
           <div class="scan-btns">${camButton('Vyhledat průvodku podle QR kódu fotoaparátem')}<button class="btn primary big" type="submit">Vyhledat</button></div>
         </form>
       </section>
@@ -1120,7 +1147,7 @@
       if (d.exact) {
         const l = d.exact.last;
         html += l ? `<section class="last-card" aria-label="Poslední záznam">
-            <div class="lc-head"><p class="eyebrow">Poslední záznam</p><div class="code">${esc(d.exact.barcode)}${d.exact.urgent != null ? ` <span class="tag crit" title="${esc(d.exact.urgent)}">⚡ ${d.exact.urgentOf ? `poddíl urgentu ${esc(d.exact.urgentOf)}` : 'URGENT'}</span>` : ''}</div><div>${actTag(l)} <span class="muted small">${esc(agoUnix(l.recorded_at_unix))}</span></div>${d.exact.info ? `<div class="mt-10">${partInfo(d.exact.info)}</div>` : ''}</div>
+            <div class="lc-head"><p class="eyebrow">Poslední záznam${d.exact.via ? ` <span class="via">nalezeno podle: ${esc(d.exact.via)}</span>` : ''}</p>${partBig(d.exact.barcode, d.exact.info)}${d.exact.urgent != null ? `<div><span class="tag crit" title="${esc(d.exact.urgent)}">⚡ ${d.exact.urgentOf ? `poddíl urgentu ${esc(d.exact.urgentOf)}` : 'URGENT'}</span></div>` : ''}<div>${actTag(l)} <span class="muted small">${esc(agoUnix(l.recorded_at_unix))}</span></div>${d.exact.info ? `<div class="mt-10">${partExtra(d.exact.info)}</div>` : ''}</div>
             <div class="lc-body">
               <div class="kv big"><small>Záznam</small><b>${esc(l.action_label)}</b></div>
               <div class="kv big"><small>Oddělení</small><b>${deptTag(l.department, l.department_label)}</b></div>
@@ -1133,9 +1160,9 @@
         html += `<section class="card"><div class="card-head"><h2>Historie průvodky<span class="count">${d.exact.count}</span></h2><span class="hint">od nejnovějšího</span></div>${recordsTable(d.exact.history, { markLast: true })}</section>`;
       }
       if (d.matches.length) {
-        html += `<section class="card"><div class="card-head"><h2>${d.exact ? 'Další průvodky' : 'Průvodky'} obsahující „${esc(d.q)}“<span class="count">${d.matches.length}${d.more ? '+' : ''}</span></h2><span class="hint">poslední záznam každé průvodky</span></div>
-          <div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>Barcode</th><th>Poslední záznam</th><th>Oddělení</th><th>Pozice / ks</th><th>Kdy</th></tr></thead><tbody>
-          ${d.matches.map(r => `<tr><td data-wide>${codeBtn(r.barcode)}${r.info ? `<span class="sub">${partInfo(r.info, true)}</span>` : ''}</td><td>${actTag(r)}</td><td>${deptTag(r.department, r.department_label)}</td>
+        html += `<section class="card"><div class="card-head"><h2>${d.exact ? 'Další průvodky' : 'Průvodky'} odpovídající „${esc(d.q)}“<span class="count">${d.matches.length}${d.more ? '+' : ''}</span></h2><span class="hint">poslední záznam každé průvodky</span></div>
+          <div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>Průvodka</th><th>Poslední záznam</th><th>Oddělení</th><th>Pozice / ks</th><th>Kdy</th></tr></thead><tbody>
+          ${d.matches.map(r => `<tr><td data-wide>${partTitle(r.barcode, r.info)}${r.matchedBy ? ` <span class="tag">${esc(r.matchedBy)}</span>` : ''}${r.info && r.info.link ? `<span class="sub">${partExtra(r.info, true)}</span>` : ''}</td><td>${actTag(r)}</td><td>${deptTag(r.department, r.department_label)}</td>
             <td>${r.position ? `pozice <b>${esc(r.position)}</b>` : r.quantity != null ? `<b>${num(r.quantity)} ks</b>` : '<span class="muted">—</span>'}</td><td class="nowrap">${esc(when(r.recorded_at))}</td></tr>`).join('')}
           </tbody></table></div>${d.more ? '<p class="hint mt-10">Zobrazeno prvních 50. Zpřesni hledání.</p>' : ''}</section>`;
       }
@@ -1200,9 +1227,9 @@
       const uRows = q ? urgentAll.filter(u => u.barcode.toLowerCase().includes(q) || (u.note || '').toLowerCase().includes(q)) : urgentAll;
       ua.hidden = !urgentAll.length;
       ua.innerHTML = urgentAll.length ? `<div class="card-head"><div><h2>⚡ Urgentní průvodky</h2><p class="hint mt-4">Z tabulek s urgenty. Na pracovišti svítí, dokud je odtamtud neexportují.</p></div><span class="tag crit">${num(urgentAll.length)}</span></div>
-        <div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>Barcode</th><th>Kde je</th><th>Pozice</th><th>Od</th><th>Poznámka</th></tr></thead><tbody>
+        <div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>Průvodka</th><th>Kde je</th><th>Pozice</th><th>Od</th><th>Poznámka</th></tr></thead><tbody>
         ${uRows.map(u => { const l = u.last; const there = l && l.action === 'prijem';
-          return `<tr class="${there || u.onsite ? 'u-there' : ''}"><td data-wide>${codeBtn(u.barcode)}${u.family ? `<span class="sub" title="Urgentní jsou i poddíly">sestava ${esc(u.mask || '')}</span>` : ''}${assemblyParts(u.parts, null)}</td>
+          return `<tr class="${there || u.onsite ? 'u-there' : ''}"><td data-wide>${partTitle(u.barcode, u.info)}${u.family ? `<span class="sub" title="Urgentní jsou i poddíly">sestava ${esc(u.mask || '')}</span>` : ''}${assemblyParts(u.parts, null)}</td>
             <td>${l ? (there ? `${deptTag(l.department, l.department_label)}` : `<span class="muted">odešla z ${esc(l.department_label)}</span>`) : '<span class="muted">zatím nikde</span>'}</td>
             <td>${there && l.position ? `<b>${esc(l.position)}</b>` : '<span class="muted">—</span>'}</td>
             <td class="nowrap">${l ? esc(agoUnix(l.recorded_at_unix)) : '—'}</td><td>${u.note ? esc(u.note) : '<span class="muted">—</span>'}</td></tr>`; }).join('')}
@@ -1212,8 +1239,8 @@
         const uN = (data.urgentCounts || {})[d.code] || 0;
         return `<section class="card onsite-card dept-${d.code}"><div class="card-head"><div><p class="eyebrow">${deptDot(d.code)}${esc(d.name)}</p><div class="big-n">${num(d.total)}${uN ? ` <span class="tag crit">⚡ ${num(uN)} ${SC.plural(uN, 'urgent', 'urgenty', 'urgentů')}</span>` : ''}</div>
             <p class="small muted">${SC.plural(d.total, 'průvodka', 'průvodky', 'průvodek')} na pracovišti</p></div></div>
-          ${rows.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Barcode</th><th>Pozice</th><th>Od</th></tr></thead><tbody>
-            ${rows.map(r => `<tr class="${isUrgent(r.barcode) ? 'u-there' : ''}"><td>${codeBtn(r.barcode)}${isUrgent(r.barcode) ? ' <span class="tag crit">⚡ urgent</span>' : ''}<span class="sub">${esc(r.user)}</span>${r.info ? `<span class="sub">${partInfo(r.info, true)}</span>` : ''}</td><td>${r.position ? `<b>${esc(r.position)}</b>` : '<span class="muted">—</span>'}</td>
+          ${rows.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Průvodka</th><th>Pozice</th><th>Od</th></tr></thead><tbody>
+            ${rows.map(r => `<tr class="${isUrgent(r.barcode) ? 'u-there' : ''}"><td>${partTitle(r.barcode, r.info)}${isUrgent(r.barcode) ? ' <span class="tag crit">⚡ urgent</span>' : ''}<span class="sub">${esc(r.user)}</span>${r.info && r.info.link ? `<span class="sub">${partExtra(r.info, true)}</span>` : ''}</td><td>${r.position ? `<b>${esc(r.position)}</b>` : '<span class="muted">—</span>'}</td>
               <td class="nowrap" title="${esc(when(r.recorded_at))}">${esc(agoUnix(r.recorded_at_unix))}</td></tr>`).join('')}</tbody></table></div>`
             : `<p class="empty">${q ? 'Nic neodpovídá filtru.' : 'Žádná průvodka.'}</p>`}
           ${d.total > d.records.length ? `<p class="hint">Zobrazeno ${num(d.records.length)} nejnovějších z ${num(d.total)}.</p>` : ''}</section>`;

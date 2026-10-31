@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Časy jsou v databázi jako unixové sekundy (UTC), ven jdou v pražském čase (ISO 8601).
  */
 
-const ETD_VERSION = '1.5.1';
+const ETD_VERSION = '1.6';
 /** Verze schématu databáze (PRAGMA user_version). Novou verzi doplň do etd_migrate(). */
 const ETD_SCHEMA = 5;
 /** Zapisovat smí jen stránka aspoň téhle verze (hlavička X-Etd-Client), viz etd_require_client(). */
@@ -933,7 +933,8 @@ function etd_can_cancel(array $session, array $record): bool
 /** Seznam záznamů pro stránku: k záznamu přidá, jestli ho přihlášený smí stornovat. */
 function etd_records_for(array $session, array $rows): array
 {
-    return array_map(static fn(array $r): array => etd_record_public($r) + ['canCancel' => etd_can_cancel($session, $r)], $rows);
+    return array_map(static fn(array $r): array => etd_record_public($r) + ['canCancel' => etd_can_cancel($session, $r),
+        'info' => etd_part_info((string)$r['barcode'])], $rows);
 }
 
 /** LIKE vzor pro „obsahuje“ (s escapováním % a _). */

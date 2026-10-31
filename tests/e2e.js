@@ -182,7 +182,7 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     const rows = await page.locator('#searchOut .tbl tbody tr').allInnerTexts();
     check(rows.length === 2 && /Export/.test(rows[0]) && /poslední záznam/.test(rows[0]) && /Příjem/.test(rows[1]), 'historie od nejnovějšího, nahoře poslední záznam');
     await page.fill('#searchInput', 'PR-20');
-    await page.waitForFunction(() => /obsahující/.test(document.querySelector('#searchOut').innerText));
+    await page.waitForFunction(() => /odpovídající/.test(document.querySelector('#searchOut').innerText));
     const matches = await page.locator('#searchOut').innerText();
     check(['PR-2001', 'PR-2002', 'PR-2003', 'PR-2009'].every(c => matches.includes(c)) && !matches.includes('PR-1001'), 'částečné hledání najde PR-20…');
     await shot(page, '06-prehled-hledani');
@@ -291,6 +291,8 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     check((await resultText(page)).includes('Poddíl urgentní sestavy 12345.678901.23456'), 'příjem poddílu urgentní sestavy: výsledek ho označí');
     const res = await resultText(page);
     check(res.includes('OBJ-2026-001') && res.includes('8590000000017') && res.includes('8590000000024') && res.includes('03'), 'výsledek skenu: objednávka, EAN, EAN sestavy a index z tabulky');
+    check((await page.locator('#scanResult .pt-big-main').innerText()).includes('OBJ-2026-001') && (await page.locator('#scanResult .pt-code').innerText()) === '12345.678902.23411',
+      'výsledek skenu: nahoře objednávka, EAN dílu a index, barcode malý pod nimi');
     const a = page.locator('#scanResult a.pi-link');
     check(await a.getAttribute('href') === pLink && await a.getAttribute('target') === '_blank' && (await a.getAttribute('rel')).includes('noopener'), 'odkaz z tabulky jde otevřít (nové okno)');
     await page.waitForSelector('#urgentBar:not([hidden])');
@@ -307,6 +309,14 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     await waitResult(page, /Urgent odešel/);
     await page.waitForSelector('#urgentBar', { state: 'hidden' });
     check(true, 'po exportu z pracoviště urgent zhasne');
+    await page.click('[data-tab=prehled]');
+    await page.waitForSelector('#searchInput');
+    await page.fill('#searchInput', '8590000000017'); await page.press('#searchInput', 'Enter');
+    await page.waitForSelector('.last-card');
+    const lc = await page.locator('.last-card').innerText();
+    check(lc.includes('nalezeno podle: EAN dílu') && lc.includes('OBJ-2026-001') && lc.includes('12345.678902.23411'), 'Přehled: hledání podle EAN dílu najde průvodku a ukáže objednávku');
+    check((await page.locator('.tbl .pt-main').first().innerText()).includes('OBJ-2026-001'), 'Přehled: v historii je nahoře objednávka místo barcodu');
+    await shot(page, '09c-prehled-podle-ean');
     await page.click('[data-tab=api]');
     await page.waitForSelector('.endpoint');
 

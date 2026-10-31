@@ -170,6 +170,35 @@ function etd_info_index(): array
     return $cache;
 }
 
+/**
+ * Hledání podle údajů z tabulek Stav průvodek (Přehled). Číslo objednávky, EAN dílu a EAN sestavy
+ * obsahují hledaný text, index musí sedět přesně. Vrací [barcode => popis pole, podle kterého sedí];
+ * nejdřív přesné shody.
+ */
+function etd_info_search(string $q, int $limit = 200): array
+{
+    $needle = mb_strtolower(trim($q));
+    if ($needle === '') {
+        return [];
+    }
+    $exact = [];
+    $partial = [];
+    foreach (etd_info_index() as $barcode => $info) {
+        foreach (['ean' => 'EAN dílu', 'order' => 'objednávka', 'eanAssembly' => 'EAN sestavy', 'index' => 'index'] as $field => $label) {
+            $v = mb_strtolower((string)($info[$field] ?? ''));
+            if ($v === '') {
+                continue;
+            }
+            if ($v === $needle) {
+                $exact[$barcode] ??= $label;
+            } elseif ($field !== 'index' && mb_strlen($needle) >= 3 && str_contains($v, $needle)) {
+                $partial[$barcode] ??= $label;
+            }
+        }
+    }
+    return array_slice($exact + $partial, 0, $limit, true);
+}
+
 /** Údaje k průvodce z tabulek (číslo objednávky, EAN, …, odkaz), nebo null. */
 function etd_part_info(string $barcode): ?array
 {
@@ -365,7 +394,7 @@ function etd_family_parts(string $barcode): array
     $out = [];
     foreach ($rows as $r) {
         if (etd_family((string)$r['barcode']) === $family) {
-            $out[] = ['barcode' => (string)$r['barcode'], 'last' => etd_record_public($r)];
+            $out[] = ['barcode' => (string)$r['barcode'], 'last' => etd_record_public($r), 'info' => etd_part_info((string)$r['barcode'])];
         }
     }
     return $cache[$family] = $out;

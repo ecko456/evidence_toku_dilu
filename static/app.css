@@ -577,6 +577,29 @@ tr.u-there td { background: color-mix(in srgb, var(--crit) 7%, transparent); }
 .asm-row .code-btn { white-space: nowrap; }
 @media (max-width: 760px) { .asm-row { grid-template-columns: minmax(0, 1fr) max-content; } .asm-row > .code-btn { grid-column: 1 / -1; } }
 
+/* ---------- průvodka podle údajů z tabulky: objednávka, EAN dílu, index nahoře, barcode malý ---------- */
+.pt { display: inline-grid; gap: 1px; min-width: 0; }
+.pt-main { all: unset; cursor: pointer; display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 7px; font-weight: 600; color: var(--ink); border-bottom: 1px dotted var(--line-2); }
+.pt-main:hover { color: var(--accent); }
+.pt-main:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.pt-main b { font-weight: 800; font-family: var(--mono); }
+.pt-main span { font-family: var(--mono); font-size: .92em; }
+.pt-main small { font-family: var(--sans); color: var(--ink-3); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+.pt-main i { font-style: normal; color: var(--ink-3); }
+.pt-code { font-family: var(--mono); font-size: .74rem; color: var(--ink-3); word-break: break-all; }
+.pt-big { display: grid; gap: 4px; margin: 4px 0 6px; }
+.pt-big-main { display: flex; flex-wrap: wrap; gap: 4px 22px; align-items: baseline; }
+.pt-big-main small { display: block; color: var(--ink-3); font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+.pt-big-main b { font: 800 1.35rem/1.15 var(--mono); letter-spacing: -.01em; }
+.pt-big .pt-code { font-size: .8rem; }
+.via { margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: var(--surface-3); color: var(--ink-2); text-transform: none; letter-spacing: 0; font-weight: 700; }
+.urgent-item .pt-main, .urgent-item .pt-main small, .urgent-item .pt-main i, .urgent-item .pt-code { color: #fff; }
+.urgent-item .pt-main { border-bottom-color: rgba(255, 255, 255, .5); }
+.urgent-item .pt-code { opacity: .8; }
+.asm.light .pt-main, .asm.light .pt-main small, .asm.light .pt-code { color: #fff; }
+.onsite-card .pt-main { display: grid; gap: 0; }
+.onsite-card .pt-main i { display: none; }
+
 /* ---------- pomocné třídy (CSP nepovoluje style="…") ---------- */
 .mt-4 { margin-top: 4px; }
 .mt-10 { margin-top: 10px; }

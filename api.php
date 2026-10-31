@@ -290,15 +290,56 @@ switch ($action) {
         }
         $exact = null;
         $history = etd_all('SELECT * FROM records WHERE barcode = ? COLLATE NOCASE ORDER BY id DESC LIMIT 500', [$q]);
-        if ($history) {
-            $last = etd_last($q);
-            $um = etd_urgent_match($q);
-            $exact = ['urgent' => $um === null ? null : $um['note'], 'urgentOf' => $um['of'] ?? null, 'info' => etd_part_info($q), 'barcode' => $last['barcode'] ?? $history[0]['barcode'], 'last' => $last === null ? null : etd_record_public($last) + ['canCancel' => etd_can_cancel($session, $last)],
-                'history' => etd_records_for($session, $history), 'count' => (int)(etd_one('SELECT COUNT(*) AS n FROM records WHERE barcode = ? COLLATE NOCASE', [$q])['n'] ?? 0)];
+        // podle údajů z tabulky Stav průvodek (objednávka, EAN dílu, EAN sestavy, index)
+        $byInfo = etd_info_search($q);
+        $via = null;
+        $qCode = $q;
+        if (!$history) {
+            // EAN dílu (nebo objednávka, EAN sestavy či index, když sedí jen na jednu průvodku) = přesná shoda
+            $exactCodes = [];
+            foreach ($byInfo as $code => $label) {
+                $info = etd_part_info($code) ?? [];
+                foreach (['ean', 'order', 'eanAssembly', 'index'] as $f) {
+                    if (mb_strtolower((string)($info[$f] ?? '')) === mb_strtolower($q)) {
+                        $exactCodes[$code] = $label;
+                        break;
+                    }
+                }
+            }
+            if (count($exactCodes) === 1 && ($code = (string)array_key_first($exactCodes)) !== '') {
+                $found = etd_all('SELECT * FROM records WHERE barcode = ? COLLATE NOCASE ORDER BY id DESC LIMIT 500', [$code]);
+                if ($found) {
+                    $history = $found;
+                    $via = $exactCodes[$code];
+                    $qCode = $code;
+                }
+            }
         }
-        $rows = etd_all("SELECT r.* FROM parts p JOIN records r ON r.id = p.last_id WHERE p.barcode LIKE ? ESCAPE '\\' AND p.barcode <> ? ORDER BY p.updated_at DESC, p.last_id DESC LIMIT 51", [etd_like($q), $q]);
-        etd_json(['q' => $q, 'exact' => $exact, 'matches' => array_map(static fn(array $r): array => etd_record_public($r) + ['info' => etd_part_info((string)$r['barcode'])], array_slice($rows, 0, 50)),
-            'more' => count($rows) > 50]);
+        if ($history) {
+            $last = etd_last($qCode);
+            $um = etd_urgent_match($qCode);
+            $exact = ['urgent' => $um === null ? null : $um['note'], 'urgentOf' => $um['of'] ?? null, 'info' => etd_part_info($qCode), 'via' => $via,
+                'barcode' => $last['barcode'] ?? $history[0]['barcode'], 'last' => $last === null ? null : etd_record_public($last) + ['canCancel' => etd_can_cancel($session, $last)],
+                'history' => etd_records_for($session, $history), 'count' => (int)(etd_one('SELECT COUNT(*) AS n FROM records WHERE barcode = ? COLLATE NOCASE', [$qCode])['n'] ?? 0)];
+        }
+        // další průvodky: barcode obsahuje hledaný text, nebo sedí údaje z tabulky (s popisem čím)
+        $rows = etd_all("SELECT r.* FROM parts p JOIN records r ON r.id = p.last_id WHERE p.barcode LIKE ? ESCAPE '\\' AND p.barcode <> ? ORDER BY p.updated_at DESC, p.last_id DESC LIMIT 51", [etd_like($q), $qCode]);
+        $matches = [];
+        $seen = [mb_strtolower($qCode) => true];
+        foreach ($byInfo as $code => $label) {
+            if (isset($seen[$code]) || count($matches) > 50 || ($r = etd_last((string)$code)) === null) {
+                continue;
+            }
+            $seen[$code] = true;
+            $matches[] = etd_record_public($r) + ['info' => etd_part_info((string)$code), 'matchedBy' => $label];
+        }
+        foreach ($rows as $r) {
+            if (!isset($seen[mb_strtolower((string)$r['barcode'])]) && count($matches) <= 50) {
+                $seen[mb_strtolower((string)$r['barcode'])] = true;
+                $matches[] = etd_record_public($r) + ['info' => etd_part_info((string)$r['barcode'])];
+            }
+        }
+        etd_json(['q' => $q, 'exact' => $exact, 'matches' => array_slice($matches, 0, 50), 'more' => count($matches) > 50]);
 
     case 'onsite':
         // průvodky, jejichž poslední záznam je příjem na daném pracovišti (jsou tam a ještě neodešly)

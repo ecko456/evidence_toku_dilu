@@ -165,6 +165,12 @@ sloupců **číslo objednávky, EAN sestavy a index** (v generátoru: Údaje k p
 
 Odkaz se bere jen `http://` nebo `https://`; jiné se neuloží. Po odpojení tabulky údaje zmizí.
 
+Když Evidence průvodku z tabulky zná, ukazuje ji všude (výsledek skenu, seznamy, Přehled, Na
+pracovištích, urgenty) podle **čísla objednávky, EAN dílu a indexu**; barcode je malým písmem pod
+tím. **Přehled hledá i podle čísla objednávky, EAN dílu, EAN sestavy (i části, aspoň 3 znaky)
+a indexu (přesně).** EAN dílu (nebo údaj, který sedí jen na jednu průvodku) otevře rovnou její
+historii s poznámkou „nalezeno podle: …“, objednávka s více průvodkami ukáže jejich seznam.
+
 ## Instalace a aktualizace (Ubuntu + Apache)
 
 ```bash
