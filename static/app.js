@@ -2,7 +2,8 @@
  * Evidence toku dílů: stránka aplikace (bez knihoven).
  *
  * Obrazovky: první spuštění → přihlášení → (nové heslo) → výběr oddělení → aplikace.
- * Záložky: Příjem na pracoviště, Export z pracoviště, Přehled, Na pracovištích, Správa, API pro IT.
+ * Záložky: Příjem na pracoviště, Export z pracoviště, Přehled, Na pracovištích, Správa, API pro IT
+ * (s generátorem skriptu pro živé propojení s Google tabulkou, static/google-tabulka.js).
  * Data jdou jen přes api.php (hlavička X-Etd). Čisté funkce pro čtečku jsou ve scan.js (ETDScan).
  */
 (() => {
@@ -325,7 +326,7 @@
         ${logo}
         <h1>Evidence toku dílů</h1>
         <p>Příjem a export průvodek na pracovištích. Načti barcode čtečkou a systém zapíše, kde díly jsou, kdo je převzal a kolik kusů odešlo.</p>
-        <div class="flow" aria-label="Pracoviště">${(ST.depts || []).map(d => `<span>${deptDot(d.code)}${esc(d.name)}</span>`).join('')}</div>
+        <div class="gflow" aria-label="Pracoviště">${(ST.depts || []).map(d => `<span>${deptDot(d.code)}${esc(d.name)}</span>`).join('')}</div>
       </section>
       <section class="welcome-side">${inner}</section></div>`;
   }
@@ -1121,6 +1122,8 @@
   function adminView(view) {
     view.innerHTML = `<section class="card"><div class="card-head"><div><h1>Uživatelé</h1><p class="hint mt-4">Kdo se smí přihlásit a na která oddělení. Visitor smí každý uživatel; role Jen nahlížení nic nezapíše.</p></div>
         <button class="btn primary" type="button" id="userAdd">+ Přidat uživatele</button></div><div id="usersBox"><p class="empty">Načítám…</p></div></section>
+      <section class="card"><div class="card-head"><div><h2>Google tabulky: živé propojení</h2><p class="hint mt-4">Tabulky, do kterých Evidence sama zapisuje příjem, export i storno sledovaných průvodek. Skript a návod: <a href="#api">API pro IT → Google tabulka</a>.</p></div>
+        <span id="workerPill"></span></div><div id="hooksBox"><p class="empty">Načítám…</p></div></section>
       <div class="grid-2">
         <section class="card"><div class="card-head"><div><h2>API klíče</h2><p class="hint mt-4">Pro napojení jiných systémů (jen čtení). Návod je v záložce API pro IT.</p></div>
           <button class="btn" type="button" id="keyAdd">+ Nový klíč</button></div><div id="keysBox"><p class="empty">Načítám…</p></div></section>
@@ -1148,6 +1151,64 @@
           : '<p class="empty">Zatím žádný klíč.</p>';
       } catch (e) { $('#keysBox').innerHTML = `<p class="empty">${esc(e.message)}</p>`; }
     }
+    let hooks = [];
+    let hooksTimer = 0;
+    const HOOK_STATUS = {
+      ok: ['ok', 'v pořádku'], waiting: ['', 'čeká na první změnu'], error: ['crit', 'chyba'], off: ['', 'vypnuté'],
+    };
+    const box = $('#hooksBox', view);
+    async function loadHooks() {
+      if (!document.body.contains(box)) { clearInterval(hooksTimer); return; }   // jiná záložka: přestat
+      try {
+        const d = await api('hooks');
+        hooks = d.hooks;
+        const w = d.worker;
+        $('#workerPill', view).innerHTML = w.running
+          ? '<span class="tag ok" title="Úloha na serveru kontroluje frontu každou sekundu.">● Odesílání běží</span>'
+          : `<span class="tag ${hooks.length ? 'crit' : 'warn'}" title="Úlohu spouští cron každou minutu; zapne ji instalace (deploy/install.sh).">● Odesílání neběží${w.seenAt ? ` (naposledy ${esc(when(w.seenAt))})` : ''}</span>`;
+        box.innerHTML = hooks.length ? `<div class="hooks">${hooks.map(h => {
+          const [cls, label] = h.keyRevoked ? ['crit', 'klíč je zrušený'] : HOOK_STATUS[h.status] || ['', h.status];
+          return `<article class="hook ${h.keyRevoked ? 'off' : 'st-' + h.status}">
+            <div class="hook-head"><div><b>${esc(h.keyName)}</b> <span class="tag ${cls}">${esc(label)}</span><span class="sub mono" title="Adresa webové aplikace tabulky">${esc(h.url)}</span></div>
+              <div class="row-8"><button class="btn small" type="button" data-hping="${h.id}">Vyzkoušet spojení</button><button class="btn small" type="button" data-hresend="${h.id}">Poslat znovu vše</button><button class="btn ghost small" type="button" data-hdel="${h.id}">Odpojit</button></div></div>
+            <div class="hook-stats">
+              <div><span class="num">${h.watching.toLocaleString('cs-CZ')}</span><small>sledovaných průvodek</small></div>
+              <div><span class="num">${h.queued.toLocaleString('cs-CZ')}</span><small>čeká na odeslání</small></div>
+              <div><span class="num">${h.sent.toLocaleString('cs-CZ')}</span><small>odesláno celkem</small></div>
+              <div><span class="num">${h.lastOkAt ? esc(agoUnix(Date.parse(h.lastOkAt) / 1000)) : '—'}</span><small>naposledy doručeno</small></div>
+            </div>
+            ${h.lastError ? `<p class="hook-err"><b>Chyba ${esc(when(h.lastErrorAt))}:</b> ${esc(h.lastError)}${h.retryAt ? ` <span class="muted">Další pokus ${esc(when(h.retryAt))}.</span>` : ''}</p>` : ''}
+          </article>`;
+        }).join('')}</div>`
+          : '<p class="empty">Zatím žádná tabulka. Skript a návod najdeš v záložce <a href="#api">API pro IT → Google tabulka</a>.</p>';
+      } catch (e) { box.innerHTML = `<p class="empty">${esc(e.message)}</p>`; }
+    }
+    box.addEventListener('click', async e => {
+      const ping = e.target.closest('[data-hping]');
+      const resend = e.target.closest('[data-hresend]');
+      const del = e.target.closest('[data-hdel]');
+      if (ping) {
+        ping.disabled = true; ping.textContent = 'Zkouším…';
+        try {
+          const r = await api('hook_ping', { id: +ping.dataset.hping });
+          if (r.ok) toast(`Spojení funguje ✔${r.reply && r.reply.sheet ? ` Tabulka „${r.reply.spreadsheet}“, list ${r.reply.sheet}.` : ''}`, 'ok', 6000);
+          else toast(r.error, 'err', 12000);
+        } catch (err) { toast(err.message, 'err'); }
+        loadHooks();
+      } else if (resend) {
+        try { const r = await api('hook_resend', { id: +resend.dataset.hresend }); toast(`Do tabulky půjde znovu ${r.queued} průvodek, za pár sekund.`, 'ok'); } catch (err) { toast(err.message, 'err'); }
+        loadHooks();
+      } else if (del) {
+        const h = hooks.find(x => x.id === +del.dataset.hdel);
+        const r = await dialog({
+          title: 'Odpojit tabulku?', ok: 'Odpojit', cancel: 'Ponechat', danger: true,
+          html: `<p>Evidence přestane do tabulky „${esc(h.keyName)}“ posílat změny. Co v tabulce už je, zůstane.</p><p class="hint">Tabulka se připojí znovu, až v ní někdo dá Evidence → Zapnout živé propojení. Natrvalo ji odpojíš zrušením API klíče.</p>`,
+          validate: async () => { try { await api('hook_delete', { id: h.id }); } catch (err) { return err.message; } return null; },
+        });
+        if (r.ok) { toast('Tabulka je odpojená.'); loadHooks(); loadLog(); }
+      }
+    });
+
     async function loadLog() {
       try {
         const log = (await api('adminlog')).log;
@@ -1233,12 +1294,13 @@
       const b = e.target.closest('[data-krevoke]');
       if (!b) return;
       const r = await dialog({
-        title: 'Zrušit API klíč?', ok: 'Zrušit klíč', cancel: 'Ponechat', danger: true, html: '<p>Systém, který klíč používá, se přestane připojovat. Zrušení nejde vrátit.</p>',
+        title: 'Zrušit API klíč?', ok: 'Zrušit klíč', cancel: 'Ponechat', danger: true, html: '<p>Systém, který klíč používá, se přestane připojovat (i Google tabulka s živým propojením). Zrušení nejde vrátit.</p>',
         validate: async () => { try { await api('apikey_revoke', { id: +b.dataset.krevoke }); } catch (err) { return err.message; } return null; },
       });
-      if (r.ok) { toast('Klíč je zrušený.'); loadKeys(); loadLog(); }
+      if (r.ok) { toast('Klíč je zrušený.'); loadKeys(); loadLog(); loadHooks(); }
     });
-    loadUsers(); loadKeys(); loadLog();
+    loadUsers(); loadKeys(); loadLog(); loadHooks();
+    hooksTimer = setInterval(() => { if (!document.hidden) loadHooks(); }, 5000);
   }
 
   /* ---------- API pro IT ---------- */
@@ -1252,8 +1314,43 @@
       },
     };
     const pre = (text) => `<div class="pre"><pre>${esc(text)}</pre><button class="btn small copy" type="button" data-copy>Kopírovat</button></div>`;
-    view.innerHTML = `<section class="card doc">
-      <div class="card-head"><div><h1>API pro IT</h1><p class="hint mt-4">Napojení jiného systému (ERP, MES, Power BI…) na poslední záznam průvodky. API jen čte, nic nezapisuje.</p></div></div>
+    const gs = Object.assign({ list: 'List1', col: 'D', link: true, param: 'activeBarcode', out: 'K', row: 2 }, store.get('gsheet', {}));
+    view.innerHTML = `<div class="stack-18"><section class="card sheets" id="gsheet">
+      <div class="card-head"><div><p class="eyebrow">Novinka ve verzi 1.3</p><h1>Google tabulka: živé propojení</h1>
+        <p class="hint mt-4">Tabulka řekne Evidenci, které průvodky sleduje, a Evidence do ní sama zapíše každý příjem, export i storno. Do pár sekund, bez obnovování.</p></div></div>
+      <div class="gflow" aria-label="Jak propojení funguje">
+        <div class="gflow-step"><span class="gflow-ico" aria-hidden="true">▦</span><b>Tabulka</b><small>pošle seznam barcodů ze sloupce <span data-gs="col">${esc(gs.col)}</span></small></div>
+        <div class="gflow-arrow" aria-hidden="true"></div>
+        <div class="gflow-step hub"><span class="gflow-ico" aria-hidden="true">◎</span><b>Evidence</b><small>hlídá příjem, export a storno těch průvodek</small></div>
+        <div class="gflow-arrow" aria-hidden="true"></div>
+        <div class="gflow-step"><span class="gflow-ico" aria-hidden="true">⚡</span><b>Tabulka</b><small>má ve sloupci <span data-gs="out">${esc(gs.out)}</span> poslední záznam</small></div>
+      </div>
+      <h3>1. Kde v tabulce co je</h3>
+      <form class="gs-form" autocomplete="off" novalidate>
+        <label class="field"><span>Název listu</span><input class="input" name="list" maxlength="100" value="${esc(gs.list)}" required></label>
+        <label class="field"><span>Sloupec s barcodem</span><input class="input mono" name="col" maxlength="3" value="${esc(gs.col)}" required></label>
+        <label class="field"><span>Výsledek do sloupce</span><input class="input mono" name="out" maxlength="3" value="${esc(gs.out)}" required></label>
+        <label class="field"><span>První řádek s daty</span><input class="input" name="row" type="number" min="1" max="1000" value="${esc(gs.row)}" required></label>
+        <div class="field gs-link"><label class="check"><input type="checkbox" name="link"${gs.link ? ' checked' : ''}> Barcode je v hypertextovém odkazu za parametrem</label>
+          <input class="input mono" name="param" maxlength="40" value="${esc(gs.param)}" aria-label="Parametr odkazu"></div>
+      </form>
+      <p class="gs-err" role="alert" hidden></p>
+      <div class="gs-demo" aria-live="polite"></div>
+      <h3>2. Skript</h3>
+      <div class="row-8"><button class="btn primary" type="button" data-gscopy>Kopírovat skript</button><span class="hint">Adresa serveru i nastavení výše jsou v něm doplněné.</span></div>
+      <details class="mt-10"><summary>Zobrazit skript</summary><div class="pre"><pre id="gsCode">Načítám…</pre></div></details>
+      <h3>3. V tabulce (jednou, pár minut)</h3>
+      <ol class="steps">
+        <li><b>Rozšíření → Apps Script</b>, smaž, co tam je, vlož skript a ulož (Ctrl+S).</li>
+        <li><b>Nasadit → Nové nasazení</b>, typ <b>Webová aplikace</b>. Spustit jako <b>Já</b>, přístup <b>Kdokoli</b>. Po nasazení potvrď oprávnění a zkopíruj <b>adresu webové aplikace</b> (končí <code>/exec</code>).</li>
+        <li>Obnov tabulku (F5). Nahoře přibude menu <b>Evidence</b>.</li>
+        <li><b>Evidence → Nastavit API klíč</b>: klíč vytvoříš ve <b>Správa → API klíče</b> (každá tabulka vlastní, ať jde zrušit zvlášť).</li>
+        <li><b>Evidence → Zapnout živé propojení</b> a vlož adresu z kroku 2. Sloupec se hned doplní a Evidence vyzkouší, že se k tabulce dostane.</li>
+      </ol>
+      <p class="hint">Stav vidíš ve <b>Správě</b> (a v tabulce: Evidence → Stav propojení). Přístup „Kdokoli“ jen znamená, že adresu jde zavolat; tabulka ale zapíše jen zprávu podepsanou tajným kódem, který zná jen ona a Evidence. Nové odkazy ve sloupci <span data-gs="col">${esc(gs.col)}</span> se začnou sledovat hned po vložení, pro jistotu se celý seznam srovná každou hodinu.</p>
+    </section>
+    <section class="card doc">
+      <div class="card-head"><div><h1>API pro IT</h1><p class="hint mt-4">Napojení jiného systému (ERP, MES, Power BI…) na poslední záznam průvodky. Záznamy API jen čte, nic do nich nezapisuje.</p></div></div>
       <h3>1. Klíč</h3>
       <p>Klíč vytvoří správce v záložce <b>Správa → API klíče</b> a předá ho IT. Posílá se v hlavičce každého požadavku:</p>
       ${pre('Authorization: Bearer etd_…')}
@@ -1265,6 +1362,7 @@
       <div class="endpoint"><span class="m post">POST</span><div><code>last</code> s tělem <code>{"barcodes": ["…", "…"]}</code><p>Poslední záznamy až ${ST.limits.batch} průvodek najednou. Vrací <code>results</code> ve stejném pořadí, u každé <code>found</code> a <code>record</code>.</p></div></div>
       <div class="endpoint"><span class="m">GET</span><div><code>history?barcode=…&amp;limit=100</code><p>Všechny platné záznamy průvodky od nejnovějšího (nejvýš 1000).</p></div></div>
       <div class="endpoint"><span class="m">GET</span><div><code>ping</code><p>Ověření, že klíč funguje.</p></div></div>
+      <div class="endpoint"><span class="m post">POST</span><div><code>watch</code> s tělem <code>{"url": "https://script.google.com/macros/s/…/exec", "secret": "…", "barcodes": ["…"], "ping": true}</code><p>Živé propojení s Google tabulkou (používá ho skript výše): seznam sledovaných průvodek (nejvýš 10 000, nahradí předchozí). Vrátí jejich poslední záznamy; při každé další změně je Evidence pošle na <code>url</code>, podepsané HMAC-SHA256 tajným kódem. <code>GET watch</code> vrátí stav, <code>DELETE watch</code> propojení vypne.</p></div></div>
       <h3>4. Odpověď</h3>
       ${pre(JSON.stringify(sample, null, 2))}
       <ul>
@@ -1288,8 +1386,70 @@
         <li><code>400 bad_request</code>: chybí nebo je špatně parametr. <code>429</code>: příliš mnoho pokusů s neplatným klíčem (čtvrt hodiny pauza).</li>
       </ul>
       <p>Odpověď je vždy JSON v UTF-8, chyby mají <code>error</code> (kód) a <code>message</code> (česky).</p>
-    </section>`;
+    </section></div>`;
     view.addEventListener('click', e => { const b = e.target.closest('[data-copy]'); if (b) copyText(b.parentElement.querySelector('pre').textContent, b); });
+
+    // generátor skriptu: šablona static/google-tabulka.js, blok <nastaveni> podle formuláře
+    const form = $('.gs-form', view);
+    let template = '';
+    let script = '';
+    const demoCode = '12345.678901.23456';
+    const colOk = c => /^[A-Z]{1,2}$/.test(c);
+    function readForm() {
+      const f = form.elements;
+      return {
+        list: f.list.value.trim(), col: f.col.value.trim().toUpperCase(), out: f.out.value.trim().toUpperCase(),
+        row: Math.trunc(+f.row.value), link: f.link.checked, param: f.param.value.trim(),
+      };
+    }
+    function problem(c) {
+      if (!c.list) return 'Vyplň název listu (záložka dole v tabulce).';
+      if (!colOk(c.col) || !colOk(c.out)) return 'Sloupec zadej písmenem, např. D nebo AB.';
+      if (c.col === c.out) return 'Výsledek musí jít do jiného sloupce, než je barcode.';
+      if (!(c.row >= 1 && c.row <= 1000)) return 'První řádek s daty: číslo od 1 do 1000.';
+      if (c.link && !/^[A-Za-z0-9_.-]{1,40}$/.test(c.param)) return 'Parametr odkazu: písmena, číslice, tečka, pomlčka nebo podtržítko (např. activeBarcode).';
+      return '';
+    }
+    function draw() {
+      const c = readForm();
+      const err = problem(c);
+      const errBox = $('.gs-err', view);
+      errBox.hidden = !err; errBox.textContent = err;
+      $('[name=param]', form).disabled = !c.link;
+      $$('[data-gs=col]', view).forEach(x => { x.textContent = c.col || '?'; });
+      $$('[data-gs=out]', view).forEach(x => { x.textContent = c.out || '?'; });
+      const dept = (ST.depts.find(d => d.code === 'hala') || ST.depts[0]).name;
+      $('.gs-demo', view).innerHTML = `<span class="eyebrow">Ukázka</span>
+        <div class="gs-demo-row"><div class="gs-cell"><small>${esc(c.col || '?')}${c.row || ''}</small>${c.link
+          ? `<span class="gs-url">http://…/detail/10001?${esc(c.param || '?')}=<mark>${demoCode}</mark>&amp;…</span>`
+          : `<mark>${demoCode}</mark>`}</div>
+          <div class="gflow-arrow" aria-hidden="true"></div>
+          <div class="gs-cell out"><small>${esc(c.out || '?')}${c.row || ''}</small>Příjem na pracoviště · ${esc(dept)} · pozice R3 · 21. 10. 2026 14:05 · Jan Novák</div></div>`;
+      $('[data-gscopy]', view).disabled = !!err || !template;
+      if (err || !template) return;
+      store.set('gsheet', c);
+      const base = location.origin + location.pathname.replace(/[^/]*$/, '') + 'api/v1/';
+      const q = JSON.stringify;
+      const block = ['// <nastaveni>', 'const ETD = {',
+        `  api: ${q(base)},`.padEnd(52) + ' // adresa API Evidence',
+        `  list: ${q(c.list)},`.padEnd(52) + ' // název listu (záložka dole)',
+        `  sloupecBarcode: ${q(c.col)},`.padEnd(52) + ' // sloupec s barcodem nebo s odkazem',
+        `  parametrOdkazu: ${q(c.link ? c.param : '')},`.padEnd(52) + (c.link ? ` // barcode je v odkazu za „${c.param}=“` : ' // barcode je přímo text buňky'),
+        `  sloupecVysledek: ${q(c.out)},`.padEnd(52) + ' // sem se zapíše poslední záznam',
+        `  prvniRadek: ${c.row},`.padEnd(52) + ' // první řádek s daty',
+        '};', '// </nastaveni>'].join('\n');
+      script = template.replace(/\/\/ <nastaveni>[\s\S]*?\/\/ <\/nastaveni>/, block);
+      $('#gsCode', view).textContent = script;
+    }
+    form.addEventListener('input', draw);
+    form.addEventListener('submit', e => e.preventDefault());
+    $('[data-gscopy]', view).onclick = e => copyText(script, e.currentTarget);
+    fetch('static/google-tabulka.js?v=' + encodeURIComponent(ST.version), { cache: 'no-cache', credentials: 'same-origin' })
+      .then(r => { if (!r.ok) throw new Error(); return r.text(); })
+      .then(t => { template = t; draw(); })
+      .catch(() => { $('#gsCode', view).textContent = 'Skript se nepodařilo načíst. Obnov stránku.'; });
+    draw();
+    if (location.hash.includes('google')) setTimeout(() => $('#gsheet', view).scrollIntoView({ block: 'start' }), 50);
   }
 
   /* ---------- start ---------- */

@@ -20,6 +20,7 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET_DIR="/var/www/evidence_toku_dilu"
 DATA_DIR="/var/lib/evidence_toku_dilu"
 APACHE_CONF="/etc/apache2/conf-available/evidence_toku_dilu.conf"
+CRON_FILE="/etc/cron.d/evidence_toku_dilu"
 DB_FILE="${DATA_DIR}/evidence.sqlite3"
 
 UPDATE=0
@@ -28,7 +29,7 @@ if [[ -f "${DB_FILE}" ]]; then
 fi
 
 apt-get update
-apt-get install -y apache2 php php-cli php-sqlite3 php-mbstring rsync
+apt-get install -y apache2 php php-cli php-sqlite3 php-mbstring rsync cron
 
 install -d -m 0750 -o root -g www-data "${TARGET_DIR}"
 install -d -m 0700 -o www-data -g www-data "${DATA_DIR}"
@@ -76,6 +77,14 @@ else
   service apache2 reload || service apache2 start
 fi
 
+# Odesílání změn do Google tabulek (živé propojení): cron každou minutu, úloha pod www-data.
+install -m 0644 -o root -g root "${SOURCE_DIR}/deploy/cron-evidence_toku_dilu" "${CRON_FILE}"
+if command -v systemctl >/dev/null 2>&1 && systemctl is-system-running >/dev/null 2>&1; then
+  systemctl enable --now cron >/dev/null 2>&1 || true
+else
+  service cron start >/dev/null 2>&1 || true
+fi
+
 # Databáze se otevře (a případně doplní o nové tabulky) pod uživatelem webového serveru.
 runuser -u www-data -- env ETD_DATA_DIR="${DATA_DIR}" php -r 'require "/var/www/evidence_toku_dilu/lib/etd.php"; etd_db(); echo "Databáze v pořádku.\n";'
 
@@ -90,6 +99,13 @@ else
   echo "Evidence toku dílů je nainstalovaná: https://<adresa-serveru>/evidence_toku_dilu/"
 fi
 echo "Data: ${DATA_DIR}. Ostatní aplikace na serveru zůstaly beze změny."
+echo "Odesílání do Google tabulek: ${CRON_FILE} (každou minutu)."
+if runuser -u www-data -- env ETD_DATA_DIR="${DATA_DIR}" php "${TARGET_DIR}/bin/hook-worker.php" --once >/dev/null; then
+  echo "Úloha odesílání se dá spustit."
+fi
+if ! php -r 'exit(@file_get_contents("https://script.google.com/", false, stream_context_create(["http" => ["timeout" => 10, "ignore_errors" => true]])) === false ? 1 : 0);'; then
+  echo "Pozor: server se nedostane na https://script.google.com (firewall nebo DNS?). Živé propojení s Google tabulkami nebude fungovat."
+fi
 if [[ -n "${SETUP_CODE}" && "${SETUP_CODE}" != *"nastavená"* ]]; then
   echo
   echo "První spuštění: otevři https://<adresa-serveru>/evidence_toku_dilu/, zadej tento kód a založ správce:"

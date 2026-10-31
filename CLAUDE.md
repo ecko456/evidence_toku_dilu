@@ -13,7 +13,33 @@ Po každé větší práci **aktualizuj sekci „Kde jsme skončili“**.
 
 ## Kde jsme skončili
 
-Stav k 21. 10. 2026, verze **1.2.1** (schéma databáze 2):
+Stav k 31. 10. 2026, verze **1.3** (schéma databáze 3):
+
+- 1.3: **živé propojení s Google tabulkou** („ať google tabulka přes API sdílí soupis barcodů a při
+  shodě se propíšou data“, „ať je to šupa“). Uživatel měl předtím ruční Apps Script (barcode
+  z odkazu `…?activeBarcode=12345.678901.23456&…` ve sloupci D, poslední záznam do K).
+  - Tabulka (skript `static/google-tabulka.js`) pošle `POST api/v1/watch` s API klíčem: adresu své
+    webové aplikace (`…/exec`, jen script.google.com, `etd_hook_url_valid`), tajný kód a barcody.
+    Odpověď vrátí poslední záznamy (`text` = řádek do buňky, `etd_record_text`), `ping` vyzkouší
+    spojení zpět. Jeden klíč = jedno propojení (`hooks`), seznam `hook_watch`.
+  - `etd_scan` a `etd_refresh_part` (storno) volají `etd_hook_touch` → `hook_queue` (jen barcode
+    a `ver`, obsah se bere až při odeslání, takže se posílá vždy aktuální stav). Úloha
+    `bin/hook-worker.php` (cron `/etc/cron.d/evidence_toku_dilu` každou minutu, uvnitř smyčka 55 s
+    po 1 s, zámek `hook-worker.lock`) posílá podepsané zprávy (HMAC-SHA256 nad `data`), Apps Script
+    odpoví 302 → výsledek se čte GETem (`etd_http` přes PHP streamy, bez curl). Chyba = backoff
+    10 s … 15 min (`hooks.fails`, `retry_at`), české hlášky (`etd_hook_send`, `etd_net_error`).
+  - Správa: karta Google tabulky (stav, Vyzkoušet spojení, Poslat znovu vše, Odpojit, „Odesílání
+    běží“ podle `meta.worker_seen_at`), obnovuje se každých 5 s. API pro IT: generátor skriptu
+    (formulář list/sloupce/parametr → blok `// <nastaveni>` v šabloně), ukázka a pět kroků.
+  - Skript: menu Evidence (klíč, zapnout, aktualizovat, stav, vypnout), spouštěče onEdit (změna ve
+    sloupci s barcody → nový seznam) a každou hodinu, `doPost` ověří podpis a zapíše jen řádky
+    s barcodem (vzorce v ostatních zůstanou). Kód v Googlu nikdo neviděl běžet: ověřeno náhradou
+    Apps Scriptu (`tests/gas_mock.js`) a náhradním Googlem (`tests/fake_google.js`, POST → 302 → GET)
+    v `tests/e2e_sheets.js`. `ETD_HOOK_TEST=1` povolí adresu 127.0.0.1 (jen testy).
+  - Aktualizace 1.2.1 → 1.3 ověřena na lokálním Apachi (schéma 2 → 3, data zůstala, cron, watch
+    přes FallbackResource i s DELETE).
+  - Čeká se od uživatele: nasazení, vytvoření skriptu v tabulce podle návodu v aplikaci a zpráva,
+    jestli se server dostane na script.google.com (instalace upozorní).
 
 - 1.2.1: oddělení 3 se jmenuje **Hala 2** („Akorát 3. se jmenuje Hala a má to být Hala 2“).
   Změnil se jen název v `ETD_DEPTS`, kód `hala` zůstal (je v uložených záznamech a v API),
@@ -94,19 +120,23 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
 - `index.php`: stránka (jen kostra, vše kreslí `static/app.js`).
 - `api.php`: JSON API pro stránku (`?action=…`). Hlavička `X-Etd: 1`, u zápisů kontrola původu
   a verze stránky (`X-Etd-Client` ≥ `ETD_MIN_CLIENT`, jinak 426 a výzva k obnovení).
-- `api/v1/index.php`: API pro IT s klíčem (viz `API.md`). Na Apachi cesty `api/v1/<endpoint>`
+- `api/v1/index.php`: API pro IT s klíčem (viz `API.md`), od 1.3 i `watch` (živé propojení). Na Apachi cesty `api/v1/<endpoint>`
   obsluhuje `FallbackResource`, ve vývoji `router.php`.
 - `lib/etd.php`: jádro. Konstanty (`ETD_DEPTS` = pracoviště v pořadí na úvodní obrazovce,
   `ETD_ACTIONS`, `ETD_ROLES`, limity), databáze a migrace (`etd_migrate`, `PRAGMA user_version`),
   relace, uživatelé, záznamy (`etd_scan`, `etd_last`, `etd_refresh_part`), API klíče.
+- `lib/hooks.php`: živé propojení s Google tabulkou (fronta, odeslání, podpis, stav).
+- `static/google-tabulka.js`: šablona Apps Scriptu pro tabulku (stránka ji načte do generátoru;
+  nespouští ji). Blok `// <nastaveni>` … `// </nastaveni>` nahrazuje generátor, neměň značky.
 - `static/app.js`: celé rozhraní (obrazovky, záložky, dialogy). `static/scan.js`: čisté funkce
   pro čtečku (`ETDScan`: čištění, oprava české klávesnice, počet kusů). `static/app.css`: vzhled,
   barvy jako tokeny na `:root` (tmavý režim přes `prefers-color-scheme`).
 - `bin/`: `setup-token.php` (kód prvního spuštění), `backup-db.php`, `reset-password.php`,
-  `rebuild-parts.php`. Jen z příkazové řádky.
-- `deploy/`: `install.sh` a konfigurace Apache. `router.php`: router pro `php -S`.
+  `rebuild-parts.php`, `hook-worker.php` (odesílání do tabulek, cron). Jen z příkazové řádky.
+- `deploy/`: `install.sh`, konfigurace Apache a `cron-evidence_toku_dilu` (→ `/etc/cron.d/`). `router.php`: router pro `php -S`.
 - `tests/`: `test_http.py` (server, API, nástroje, aktualizace databáze verze 1.0), `test_scan.js`,
-  `e2e.js` (Playwright), `e2e_camera.js` (QR fotoaparátem s falešnou kamerou).
+  `e2e.js` (Playwright), `e2e_camera.js` (QR fotoaparátem s falešnou kamerou), `e2e_sheets.js`
+  (Google tabulka: `gas_mock.js` + `fake_google.js`).
 - `static/vendor/`: `zxing.min.js` a `LICENSE-zxing.txt` (licence se z webu nevydává, `.txt`).
 
 ## Datový model (SQLite, `lib/etd.php`)
@@ -126,6 +156,9 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
   Na něm stojí poslední záznam, částečné hledání i Na pracovištích.
 - `api_keys` (jen otisk klíče, prefix pro zobrazení), `attempts` (neúspěšná přihlášení a klíče),
   `admin_log` (historie správy).
+- Schéma 3 (1.3): `hooks` (propojení na API klíč: url, `secret` v čitelné podobě kvůli podpisu,
+  počítadla, `fails`, `retry_at`), `hook_watch` (sledované barcody, NOCASE), `hook_queue`
+  (co poslat, `ver`), `meta` (`worker_seen_at`).
 - Nová verze schématu: přidej blok `if ($version < N)` do `etd_migrate` a zvyš `ETD_SCHEMA`.
   Jen přidávat (tabulky, sloupce s výchozí hodnotou), nic nemazat. Nové oddělení = nový řádek
   v `ETD_DEPTS` (kód se ukládá do záznamů, neměň ho), barva `--d-N` a třída `.dept-<kód>`
@@ -135,17 +168,18 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
 ## Vývoj a testy v cloudové session
 
 ```bash
-python3 -m unittest discover -s tests     # 32 testů, asi 25 s
+python3 -m unittest discover -s tests     # 36 testů, asi 20 s
 node tests/test_scan.js
 node tests/e2e.js                         # SHOTS=/adresář uloží snímky
 node tests/e2e_camera.js                  # fotoaparát (Chromium s --use-file-for-fake-video-capture)
+node tests/e2e_sheets.js                  # Google tabulka (náhradní Apps Script a Google, curl)
 php -l lib/etd.php                        # a další změněné PHP soubory
 ```
 
 - Lokálně: `ETD_DATA_DIR=$S/etd php -S 127.0.0.1:8480 router.php`, kód prvního spuštění
   vypíše `ETD_DATA_DIR=$S/etd php bin/setup-token.php`.
-- Playwright: `require('/opt/node22/lib/node_modules/playwright')`, Chromium
-  `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`; `playwright install` nespouštěj.
+- Playwright: `require('/opt/node22/lib/node_modules/playwright')`, Chromium z `/opt/pw-browsers`
+  (testy cestu `chromium-1194` použijí, jen když existuje; jinak výchozí); `playwright install` nespouštěj.
 - Apache v kontejneru (jen tady, nikdy na ostrém serveru): `sudo bash deploy/install.sh`, pak
   `http://127.0.0.1/evidence_toku_dilu/` (z localhostu aplikace pustí i bez HTTPS).
 - Pozor na `pkill -f "php -S …"`: vzor najde i vlastní shell a zabije ho.

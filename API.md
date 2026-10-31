@@ -1,7 +1,8 @@
 # API pro IT (v1)
 
-API jen čte. Vrací poslední platný záznam průvodky (příjem nebo export, pracoviště, pozice,
-počet kusů, kdo a kdy), případně celou historii. Stejný návod je v aplikaci v záložce
+Záznamy API jen čte. Vrací poslední platný záznam průvodky (příjem nebo export, pracoviště, pozice,
+počet kusů, kdo a kdy), případně celou historii. Od verze 1.3 umí i **živé propojení**: systém pošle
+seznam sledovaných průvodek a Evidence mu každou jejich změnu sama pošle (endpoint `watch`). Stejný návod je v aplikaci v záložce
 **API pro IT** (vidí ji správce) i s adresou serveru.
 
 ## Přístup
@@ -25,6 +26,9 @@ nebo `X-Api-Key: etd_0123…`. API běží jen přes HTTPS.
 | POST | `last` s tělem `{"barcodes": ["…", …]}` | poslední záznamy až 500 průvodek najednou (`results` ve stejném pořadí) |
 | GET | `history?barcode=…&limit=100` | platné záznamy průvodky od nejnovějšího (nejvýš 1000) |
 | GET | `ping` | ověření klíče |
+| POST | `watch` | živé propojení: seznam sledovaných průvodek (viz níže) |
+| GET | `watch` | stav živého propojení |
+| DELETE | `watch` | vypnutí živého propojení |
 
 Bez přepisu cest na serveru jde i `api/v1/index.php?endpoint=last&barcode=…`.
 
@@ -62,6 +66,42 @@ Bez přepisu cest na serveru jde i `api/v1/index.php?endpoint=last&barcode=…`.
 - Velikost písmen v barcodu nehraje roli. Stornované záznamy se do posledního stavu ani do
   historie nepočítají.
 
+## Živé propojení (`watch`, od verze 1.3)
+
+Je určené pro Google tabulku; hotový skript vygeneruje aplikace (API pro IT → Google tabulka).
+Příjemce musí být webová aplikace Google Apps Script (`https://script.google.com/macros/s/…/exec`,
+u Google Workspace i `…/a/macros/<doména>/s/…/exec`). Jiné adresy server odmítne, aby neposílal
+data jinam. Jeden API klíč = jedno propojení.
+
+```
+POST api/v1/watch
+{"url": "https://script.google.com/macros/s/…/exec", "secret": "<32 až 128 znaků A-Z a-z 0-9 - _>",
+ "barcodes": ["12345.678901.23456", …], "ping": true}
+```
+
+- `barcodes` (nejvýš 10 000) nahradí předchozí seznam. Prázdné a příliš dlouhé se přeskočí (`skipped`).
+- Odpověď: `watching`, `found` a `results` = poslední záznamy nalezených průvodek
+  (`barcode`, `found`, `text` = jeden řádek pro buňku, `record` jako u `last`).
+- `ping: true`: server hned pošle zkušební zprávu a vrátí `ping: {"ok": …, "error": …}`.
+- `worker.running`: běží na serveru úloha odesílání (cron)?
+
+Při každém příjmu, exportu nebo stornu sledované průvodky pošle server do pár sekund na `url`:
+
+```
+POST <url>
+{"etd": 1, "data": "<JSON jako text>", "sig": "<HMAC-SHA256(data, secret) hex>"}
+data = {"type": "update" | "ping", "hook": 1, "sent_at": 1792591509, "app": "Evidence toku dílů 1.3",
+        "items": [{"barcode": "…", "found": true, "text": "Export z pracoviště · Elox · 48 ks · 21. 10. 2026 14:05 · Jan Novák", "record": {…}}]}
+```
+
+- Příjemce ověří podpis nad textem `data` (jen ASCII) a stáří `sent_at` (Apps Script: do hodiny)
+  a odpoví JSON `{"ok": true}`. Jinak server zprávu nepovažuje za doručenou.
+- `found: false` = průvodka nemá žádný platný záznam (např. po stornu jediného záznamu).
+- Ve zprávě je vždy aktuální stav. Více změn téže průvodky se může slít do jedné zprávy,
+  v jedné zprávě je nejvýš 200 průvodek.
+- Když příjemce neodpoví, server zkouší znovu po 10 s, 20 s, 40 s … nejdéle po 15 minutách. Stav
+  a poslední chyba jsou v `GET watch` a ve Správě.
+
 ## Chyby
 
 Odpověď je vždy JSON v UTF-8. Chyba má `error` (kód) a `message` (česky).
@@ -72,7 +112,7 @@ Odpověď je vždy JSON v UTF-8. Chyba má `error` (kód) a `message` (česky).
 | 401 | `unauthorized` | chybí klíč, je neplatný nebo zrušený |
 | 403 | `https_required` | požadavek přišel bez HTTPS |
 | 404 | `not_found` | průvodka v evidenci není (u `last` i `"found": false`), nebo neznámý endpoint |
-| 405 | `method_not_allowed` | jiná metoda než GET/POST |
+| 405 | `method_not_allowed` | metoda, kterou endpoint nepodporuje (`watch` bere i DELETE) |
 | 429 | `too_many_attempts` | víc než 60 požadavků s neplatným klíčem za čtvrt hodiny z jedné adresy |
 
 ## Příklady

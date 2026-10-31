@@ -30,11 +30,11 @@ def free_port():
 
 
 class Server:
-    def __init__(self, data=None):
+    def __init__(self, data=None, **env):
         self.data = Path(data) if data else Path(tempfile.mkdtemp(prefix="etd-"))
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}"
-        self.env = dict(os.environ, ETD_DATA_DIR=str(self.data), NO_PROXY="*")
+        self.env = dict(os.environ, ETD_DATA_DIR=str(self.data), NO_PROXY="*", **env)
         self.process = subprocess.Popen(
             [PHP, "-S", f"127.0.0.1:{self.port}", "router.php"],
             cwd=APP, env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -121,8 +121,10 @@ class Client:
 class Base(unittest.TestCase):
     """Každý test má vlastní server s čistými daty a prvního správce."""
 
+    SERVER_ENV = {}
+
     def setUp(self):
-        self.server = Server()
+        self.server = Server(**self.SERVER_ENV)
         self.admin = Client(self.server)
         token = self.server.cli("bin/setup-token.php").stdout.strip()
         status, data = self.admin.post("setup", {"token": token, "login": "spravce", "name": "Jana Správcová", "password": PASSWORD})
@@ -584,13 +586,132 @@ class ApiV1Tests(Base):
         self.assertEqual(status, 429)
 
 
+class WatchApiTests(Base):
+    """Živé propojení s Google tabulkou (1.3): seznam sledovaných barcodů a fronta změn.
+    Celou cestu až do tabulky (podpis, doPost, zápis do listu) zkouší tests/e2e_sheets.js."""
+
+    SERVER_ENV = {"ETD_HOOK_TEST": "1"}   # povolí náhradní „Google“ na 127.0.0.1; ven nejde nic
+    URL = "https://script.google.com/macros/s/AKfycbx1234567890abcdefghijXYZ/exec"
+    SECRET = "s" * 64
+
+    def setUp(self):
+        super().setUp()
+        self.admin.dept("hala")
+        self.admin.scan("prijem", [{"barcode": "12345.1.1"}, {"barcode": "12345.1.2"}], position="R3", define=True)
+        status, data = self.admin.post("apikey_create", {"name": "Kooperace"})
+        self.key = data["key"]
+
+    def watch(self, body=None, method="POST", key=None):
+        headers = {"X-Etd": None, "X-Etd-Client": None, "Authorization": "Bearer " + (key or self.key)}
+        return Client(self.server).request(method, "/api/v1/watch", body, headers=headers)
+
+    def queue(self):
+        with self.server.db() as db:
+            return sorted(r[0] for r in db.execute("SELECT barcode FROM hook_queue"))
+
+    def test_validation(self):
+        good = {"url": self.URL, "secret": self.SECRET, "barcodes": ["12345.1.1"]}
+        cases = [
+            dict(good, url="https://example.com/macros/s/AKfycbx1234567890abcdefghijXYZ/exec"),
+            dict(good, url="http://script.google.com/macros/s/AKfycbx1234567890abcdefghijXYZ/exec"),
+            dict(good, url="https://script.google.com/macros/s/AKfycbx1234567890abcdefghijXYZ/exec?x=1"),
+            dict(good, secret="kratky"),
+            dict(good, barcodes="12345.1.1"),
+            dict(good, barcodes=["x"] * 10001),
+        ]
+        for body in cases:
+            status, data = self.watch(body)
+            self.assertEqual((status, data["error"]), (400, "bad_request"), body if len(str(body)) < 300 else "10001 barcodů")
+        # mimo testy adresa na tenhle stroj neprojde
+        env = {k: v for k, v in self.server.env.items() if k != "ETD_HOOK_TEST"}
+        out = subprocess.run([PHP, "-r", 'require "lib/etd.php"; echo json_encode([etd_hook_url_valid("http://127.0.0.1:9/macros/s/x/exec"), etd_hook_url_valid("%s")]);' % self.URL],
+                             cwd=APP, env=env, capture_output=True, text=True)
+        self.assertEqual(out.stdout, "[false,true]", out.stderr)
+        status, data = self.watch(method="PUT", body=good)
+        self.assertEqual(status, 405)
+        status, data = self.watch(method="GET")
+        self.assertEqual((status, data["connected"]), (200, False))
+        status, data = self.watch(dict(good, url="https://script.google.com/a/macros/firma.cz/s/AKfycbx1234567890abcdefghijXYZ/exec"))
+        self.assertEqual(status, 200, "firemní adresa Workspace")
+
+    def test_register_queue_and_unregister(self):
+        self.URL = f"http://127.0.0.1:{free_port()}/macros/s/zavreny/exec"   # „Google“, který neodpovídá
+        status, data = self.watch({"url": self.URL, "secret": self.SECRET, "barcodes": ["12345.1.1", "12345.1.1", "12345.1.2", "12345.1.3", "", None, "x" * 201]})
+        self.assertEqual(status, 200, data)
+        self.assertEqual((data["watching"], data["found"], data["skipped"]), (3, 2, 2))
+        self.assertEqual([r["barcode"] for r in data["results"]], ["12345.1.1", "12345.1.2"])
+        self.assertRegex(data["results"][0]["text"], r"^Příjem na pracoviště · Hala 2 · pozice R3 · \d+\. \d+\. \d{4} \d+:\d\d · Jana Správcová$")
+        self.assertEqual(data["results"][0]["record"]["position"], "R3")
+        self.assertFalse(data["worker"]["running"])
+        # příjem, export i storno sledované průvodky ji zařadí do fronty (jednou), nesledované ne
+        self.admin.scan("export", [{"barcode": "12345.1.1", "qty": 3}])
+        self.admin.scan("prijem", [{"barcode": "12345.1.3"}, {"barcode": "JINA"}])
+        self.assertEqual(self.queue(), ["12345.1.1", "12345.1.3"])
+        status, recent = self.admin.get("recent")
+        self.admin.post("cancel", {"id": next(r["id"] for r in recent["records"] if r["barcode"] == "12345.1.3")})
+        self.assertEqual(self.queue(), ["12345.1.1", "12345.1.3"])
+        with self.server.db() as db:
+            vers = dict(db.execute("SELECT barcode, ver FROM hook_queue"))
+        self.assertEqual(vers["12345.1.3"], 2, "druhá změna zvýšila verzi, nepřidala řádek")
+        # nový seznam: z fronty zmizí, co už se nesleduje; logy jen při zapnutí
+        status, data = self.watch({"url": self.URL, "secret": self.SECRET, "barcodes": ["12345.1.1"]})
+        self.assertEqual(self.queue(), ["12345.1.1"])
+        status, data = self.watch(method="GET")
+        self.assertEqual((data["connected"], data["status"]["watching"], data["status"]["queued"], data["status"]["status"]), (True, 1, 1, "waiting"))
+        status, log = self.admin.get("adminlog")
+        self.assertEqual(sum("živé propojení" in l["text"] for l in log["log"]), 1)
+        # Google nedostupný: úloha zapíše chybu a počká, fronta zůstane
+        out = self.server.cli("bin/hook-worker.php", "--once")
+        self.assertIn("Odesláno průvodek: 0", out.stdout)
+        status, hooks = self.admin.get("hooks")
+        h = hooks["hooks"][0]
+        self.assertEqual((h["status"], h["queued"], h["keyName"]), ("error", 1, "Kooperace"))
+        self.assertTrue(h["lastError"])
+        self.assertIsNotNone(h["retryAt"])
+        self.assertNotIn(self.SECRET, json.dumps(hooks), "tajný kód se ve Správě neukazuje")
+        self.assertTrue(hooks["worker"]["running"])
+        # vypnutí
+        status, data = self.watch(method="DELETE")
+        self.assertEqual((status, data["removed"]), (200, True))
+        self.assertEqual(self.queue(), [])
+        status, hooks = self.admin.get("hooks")
+        self.assertEqual(hooks["hooks"], [])
+
+    def test_unreachable_sheet_is_reported(self):
+        status, data = self.watch({"url": f"http://127.0.0.1:{free_port()}/macros/s/x/exec", "secret": self.SECRET, "barcodes": [], "ping": True})
+        self.assertEqual(status, 200, data)
+        self.assertFalse(data["ping"]["ok"])
+        self.assertIn("nespojil", data["ping"]["error"])
+        status, hooks = self.admin.get("hooks")
+        self.assertEqual(hooks["hooks"][0]["status"], "error")
+        self.assertIn("…", self.watch_url_masked())
+
+    def watch_url_masked(self):
+        self.watch({"url": self.URL, "secret": self.SECRET, "barcodes": []})
+        return self.admin.get("hooks")[1]["hooks"][0]["url"]
+
+    def test_page_actions_are_admin_only(self):
+        self.watch({"url": self.URL, "secret": self.SECRET, "barcodes": ["12345.1.1"]})
+        worker, _ = self.user("dvorak", depts=["hala"])
+        for action in ("hooks",):
+            status, _ = worker.get(action)
+            self.assertEqual(status, 403)
+        for action in ("hook_resend", "hook_ping", "hook_delete"):
+            status, _ = worker.post(action, {"id": 1})
+            self.assertEqual(status, 403)
+        status, data = self.admin.post("hook_resend", {"id": 1})
+        self.assertEqual((status, data["queued"]), (200, 1))
+        status, data = self.admin.post("hook_delete", {"id": 99})
+        self.assertEqual(status, 404)
+
+
 class DataTests(Base):
     def test_backup_rebuild_and_reopen_keep_data(self):
         self.admin.dept("hala")
         self.admin.scan("prijem", [{"barcode": f"B-{i}"} for i in range(30)], position="A1", define=True)
         self.admin.scan("export", [{"barcode": "B-1", "qty": 2}])
         with self.server.db() as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
             parts_before = sorted(db.execute("SELECT barcode, last_id, last_action, last_dept FROM parts").fetchall())
         backups = self.server.data / "zalohy"
         out = self.server.cli("bin/backup-db.php", str(backups))
@@ -821,8 +942,10 @@ class UpgradeTests(unittest.TestCase):
             status, data_ = client.post("user_save", {"login": "novak", "name": "Novák", "role": "operator", "depts": ["hala"], "passwordMode": "self", "active": True})
             self.assertEqual(status, 200, data_)
             with server.db() as db:
-                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
                 self.assertIn("pending_until", [r[1] for r in db.execute("PRAGMA table_info(users)")])
+                tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+                self.assertTrue({"hooks", "hook_watch", "hook_queue", "meta"} <= tables, "schéma 3 (živé propojení)")
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM records").fetchone()[0], 2)
         finally:
             server.stop()

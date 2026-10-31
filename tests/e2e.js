@@ -1,7 +1,7 @@
 /*
  * Průchod aplikací v Chromiu (Playwright): první spuštění, příjem a export jednotlivě
  * i vícenásobně, pozice, počet kusů, oprava rozložení klávesnice, přehled, na pracovištích,
- * storno, správa uživatelů a API klíčů, API pro IT, Visitor a telefon.
+ * storno, správa uživatelů a API klíčů, API pro IT (i generátor skriptu pro Google tabulku), Visitor a telefon.
  *
  *   node tests/e2e.js              (SHOTS=/adresář uloží snímky obrazovky)
  *
@@ -244,6 +244,20 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     await page.click('[data-tab=api]');
     await page.waitForSelector('.endpoint');
     check((await page.locator('.doc').innerText()).includes(base + '/api/v1/'), 'API pro IT ukazuje adresu API');
+    await page.waitForFunction(() => document.querySelector('#gsCode').textContent.includes('function doPost'));
+    await page.fill('.gs-form [name=list]', 'Kooperace "H2"');
+    await page.fill('.gs-form [name=out]', 'm');
+    let gsCode = await page.textContent('#gsCode');
+    check(gsCode.includes(`api: "${base}/api/v1/"`) && gsCode.includes('list: "Kooperace \\"H2\\""') && gsCode.includes('sloupecVysledek: "M"'),
+      'generátor skriptu pro Google tabulku: adresa serveru a nastavení z formuláře');
+    check(!gsCode.includes("'https://SERVER/"), 've skriptu nezůstala ukázková adresa');
+    new Function(gsCode);   // skript je platný JavaScript
+    await page.fill('.gs-form [name=out]', 'D');
+    check(await page.isDisabled('[data-gscopy]') && (await page.textContent('.gs-err')).includes('jiného sloupce'), 'generátor: výsledek do sloupce s barcodem nejde');
+    await page.uncheck('.gs-form [name=link]');
+    await page.fill('.gs-form [name=out]', 'K');
+    gsCode = await page.textContent('#gsCode');
+    check(gsCode.includes('parametrOdkazu: ""') && !(await page.isDisabled('[data-gscopy]')), 'generátor: barcode přímo v buňce');
     await shot(page, '09-api');
 
     /* --- API pro IT s klíčem --- */

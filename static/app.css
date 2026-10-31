@@ -441,6 +441,60 @@ dialog.cam-dlg::backdrop { background: #000; }
 .cam-acts { display: flex; gap: 10px; justify-content: center; }
 .cam-acts .btn { min-width: 140px; min-height: 50px; }
 
+/* ---------- Google tabulka: živé propojení (Správa a API pro IT) ---------- */
+.hooks { display: grid; gap: 12px; }
+.hook { border: 1px solid var(--line); border-left: 4px solid var(--line-2); border-radius: var(--radius-s); padding: 14px 16px; background: var(--surface-2); }
+.hook.st-ok { border-left-color: var(--ok); }
+.hook.st-error, .hook.off { border-left-color: var(--crit); }
+.hook-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px 16px; flex-wrap: wrap; }
+.hook-head .sub { margin-top: 2px; word-break: break-all; }
+.hook-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.hook-stats div { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+.hook-stats .num { display: block; font-size: 1.2rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hook-stats small { color: var(--ink-3); font-size: .8rem; }
+.hook-err { margin-top: 10px; padding: 8px 12px; border-radius: 8px; background: var(--crit-bg); color: var(--ink); font-size: .9rem; }
+.hook-err b { color: var(--crit); }
+.sheets h3 { margin: 22px 0 10px; }
+.gflow { display: grid; grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr) 34px minmax(0, 1fr); align-items: stretch; gap: 0; margin: 4px 0 6px; }
+.gflow-step { display: grid; gap: 2px; align-content: start; padding: 12px 14px; border-radius: var(--radius-s); background: var(--surface-2); border: 1px solid var(--line); min-width: 0; }
+.gflow-step.hub { background: var(--brand-2); border-color: var(--accent); color: var(--brand-ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.gflow-step.hub small { color: color-mix(in srgb, var(--brand-ink) 78%, transparent); }
+.gflow-step small { color: var(--ink-3); font-size: .85rem; }
+.gflow-ico { font-size: 1.15rem; line-height: 1; margin-bottom: 4px; }
+.gflow-arrow { position: relative; align-self: center; height: 2px; margin: 0 6px; background: var(--line-2); }
+.gflow-arrow::after { content: ""; position: absolute; right: -1px; top: -5px; border: 6px solid transparent; border-left: 8px solid var(--line-2); border-right: 0; }
+.gflow-arrow::before { content: ""; position: absolute; left: 0; top: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: flow-dot 2.4s linear infinite; }
+@keyframes flow-dot { from { left: 0; opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } to { left: calc(100% - 6px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .gflow-arrow::before { animation: none; display: none; } }
+.gs-form { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)); gap: 0 14px; }
+.gs-form .field { margin-bottom: 10px; }
+.gs-link { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.gs-link .input { width: min(220px, 100%); }
+.gs-link .input:disabled { opacity: .5; }
+.gs-err { margin: 2px 0 8px; color: var(--crit); font-weight: 600; font-size: .9rem; }
+.gs-demo { margin-top: 6px; padding: 12px 14px; border-radius: var(--radius-s); border: 1px dashed var(--line-2); background: var(--surface-2); }
+.gs-demo-row { display: grid; grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1.3fr); align-items: center; margin-top: 8px; }
+.gs-cell { position: relative; padding: 18px 10px 8px; border: 1px solid var(--line-2); background: var(--surface); font-size: .88rem; min-width: 0; word-break: break-word; }
+.gs-cell small { position: absolute; top: 2px; left: 6px; font: 700 .7rem var(--mono); color: var(--ink-3); }
+.gs-cell.out { border-color: var(--ok); box-shadow: inset 3px 0 0 var(--ok); }
+.gs-url { font-family: var(--mono); font-size: .8rem; color: var(--ink-2); }
+mark { background: color-mix(in srgb, var(--warn) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 2px; font-weight: 700; }
+.steps { margin: 4px 0 12px; padding-left: 22px; display: grid; gap: 8px; color: var(--ink-2); }
+.steps code { font-family: var(--mono); font-size: .88rem; background: var(--surface-3); padding: 1px 6px; border-radius: 5px; }
+details summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.sheets .pre pre { max-height: 420px; }
+@media (max-width: 760px) {
+  .hook-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .gflow { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .gflow-arrow { width: 2px; height: 22px; margin: 0 auto; }
+  .gflow-arrow::after { right: auto; left: -5px; top: auto; bottom: -1px; border: 6px solid transparent; border-top: 8px solid var(--line-2); border-bottom: 0; }
+  .gflow-arrow::before { display: none; }
+  .gs-form { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .gs-form .field:first-child { grid-column: 1 / -1; }
+  .gs-demo-row { grid-template-columns: minmax(0, 1fr); }
+  .gs-demo-row .gflow-arrow { margin: 4px auto; height: 16px; }
+}
+
 /* ---------- pomocné třídy (CSP nepovoluje style="…") ---------- */
 .mt-4 { margin-top: 4px; }
 .mt-10 { margin-top: 10px; }

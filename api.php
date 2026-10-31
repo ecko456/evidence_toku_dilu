@@ -16,7 +16,7 @@ $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 $action = (string)($_GET['action'] ?? '');
 etd_require_app_request($method);
 
-const ETD_POST_ACTIONS = ['setup', 'login', 'first_password', 'logout', 'dept', 'password', 'scan', 'cancel', 'user_save', 'apikey_create', 'apikey_revoke'];
+const ETD_POST_ACTIONS = ['setup', 'login', 'first_password', 'logout', 'dept', 'password', 'scan', 'cancel', 'user_save', 'apikey_create', 'apikey_revoke', 'hook_resend', 'hook_ping', 'hook_delete'];
 if (in_array($action, ETD_POST_ACTIONS, true) && $method !== 'POST') {
     etd_fail('Tahle akce vyžaduje POST.', 405);
 }
@@ -440,6 +440,36 @@ switch ($action) {
         etd_exec('UPDATE api_keys SET revoked_at = ?, revoked_by = ? WHERE id = ?', [time(), (string)$admin['name'], $id]);
         etd_log((string)$admin['name'], "Zrušen API klíč „{$key['name']}“ ({$key['prefix']}…).");
         etd_json(['ok' => true]);
+
+    case 'hooks':
+        etd_require_admin();
+        $rows = etd_all('SELECT h.*, k.name AS key_name, k.prefix AS key_prefix, k.revoked_at AS key_revoked FROM hooks h JOIN api_keys k ON k.id = h.api_key_id ORDER BY h.id');
+        $seen = etd_worker_seen();
+        etd_json([
+            'hooks' => array_map(static fn(array $h): array => etd_hook_public($h, true) + ['keyName' => $h['key_name'], 'keyPrefix' => $h['key_prefix'],
+                'keyRevoked' => $h['key_revoked'] !== null], $rows),
+            'worker' => ['running' => $seen !== null && $seen >= time() - 150, 'seenAt' => etd_iso($seen)],
+        ]);
+
+    case 'hook_resend':
+    case 'hook_ping':
+    case 'hook_delete':
+        $admin = etd_require_admin();
+        $hook = etd_one('SELECT h.*, k.name AS key_name FROM hooks h JOIN api_keys k ON k.id = h.api_key_id WHERE h.id = ?', [(int)(etd_input()['id'] ?? 0)]);
+        if ($hook === null) {
+            etd_fail('Propojení neexistuje.', 404);
+        }
+        if ($action === 'hook_delete') {
+            etd_exec('DELETE FROM hooks WHERE id = ?', [(int)$hook['id']]);
+            etd_log((string)$admin['name'], "Odpojena Google tabulka (klíč „{$hook['key_name']}“). Tabulka se znovu připojí, až v ní někdo zapne živé propojení.");
+            etd_json(['ok' => true]);
+        }
+        if ($action === 'hook_ping') {
+            $result = etd_hook_ping($hook);
+            etd_json(['ok' => $result['ok'], 'error' => $result['error'], 'reply' => $result['reply'] === null ? null : array_intersect_key($result['reply'], ['sheet' => 1, 'rows' => 1, 'spreadsheet' => 1])]);
+        }
+        $count = etd_hook_requeue_all((int)$hook['id']);
+        etd_json(['ok' => true, 'queued' => $count]);
 
     case 'adminlog':
         etd_require_admin();

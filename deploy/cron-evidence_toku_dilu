@@ -1,0 +1,6 @@
+# Evidence toku dílů: odesílání změn do Google tabulek (živé propojení, verze 1.3).
+# Úloha běží asi minutu a frontu kontroluje každou sekundu; cron ji každou minutu pustí znovu
+# (souběžně běží vždy jen jedna). Soubor zakládá deploy/install.sh do /etc/cron.d/.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+* * * * * www-data ETD_DATA_DIR=/var/lib/evidence_toku_dilu php /var/www/evidence_toku_dilu/bin/hook-worker.php >/dev/null 2>&1

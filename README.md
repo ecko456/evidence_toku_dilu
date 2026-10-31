@@ -3,7 +3,8 @@
 Webová aplikace pro evidenci toku dílů mezi pracovišti. Pracovník načte čtečkou hlavní barcode
 průvodky a zapíše **Příjem na pracoviště** nebo **Export z pracoviště**. Přehled vždy ukáže
 poslední záznam průvodky (kde je, kdo ji převzal, kolik kusů odešlo) a celou historii od
-nejnovějšího. Pro IT je k dispozici API pro čtení posledního záznamu (viz [API.md](API.md)).
+nejnovějšího. Pro IT je k dispozici API pro čtení posledního záznamu (viz [API.md](API.md))
+a Google tabulka se dá napojit tak, že do ní Evidence sama do pár sekund zapisuje změny.
 
 PHP 8.1+ a SQLite, bez dalších knihoven. Běží na adrese `/evidence_toku_dilu/` vedle ostatních
 aplikací na serveru a má vlastní data i přihlášení.
@@ -99,6 +100,37 @@ zapnout **Světlo**.
   QR kódy čte obojí spolehlivě, čárové kódy podle kvality fotoaparátu a světla.
 - Na počítači tlačítko není, tam se čte čtečkou.
 
+## Google tabulka: živé propojení (od verze 1.3)
+
+Tabulka pošle Evidenci seznam barcodů, které sleduje (třeba z odkazů `…?activeBarcode=12345.678901.23456&…`
+ve sloupci D), a Evidence do ní sama zapíše poslední záznam každé z nich (třeba do sloupce K):
+
+```
+Příjem na pracoviště · Hala 2 · pozice R3 · 21. 10. 2026 14:05 · Jan Novák
+```
+
+Při každém příjmu, exportu i stornu sledované průvodky přijde změna do pár sekund. Bez obnovování
+a bez časovačů v tabulce.
+
+**Nastavení:** v aplikaci záložka **API pro IT → Google tabulka**. Vyplníš list a sloupce, zkopíruješ
+hotový skript (adresa serveru je v něm doplněná) a podle pěti kroků ho vložíš do tabulky:
+Apps Script, nasazení jako webová aplikace (spustit jako Já, přístup Kdokoli), menu
+**Evidence → Nastavit API klíč** a **Zapnout živé propojení**. Každá tabulka má vlastní API klíč.
+
+- **Stav** je ve **Správě** (karta Google tabulky): kolik průvodek se sleduje, co čeká na odeslání,
+  kdy se naposledy doručilo, srozumitelná chyba a tlačítka Vyzkoušet spojení, Poslat znovu vše
+  a Odpojit. V tabulce totéž v menu **Evidence → Stav propojení** (i s posledními živými změnami).
+- Nové odkazy ve sloupci se začnou sledovat hned po vložení. Pro jistotu se celý seznam srovná
+  každou hodinu (i kdyby se nějaká zpráva ztratila).
+- **Bezpečnost:** server posílá data jen na `script.google.com` a jen u průvodek, které tabulka sleduje.
+  Každá zpráva je podepsaná tajným kódem, který zná jen tabulka a Evidence (HMAC-SHA256). Bez platného
+  podpisu tabulka nic nezapíše. Zrušením API klíče se tabulka hned odpojí.
+- **Když Google neodpovídá**, změny počkají ve frontě a server to zkouší znovu (10 s, 20 s, 40 s …
+  nejdéle po 15 minutách). Posílá se vždy aktuální stav, nic se nepřeskočí ani nezdvojí.
+- Na serveru změny odesílá úloha `bin/hook-worker.php`, kterou každou minutu spouští cron
+  (`/etc/cron.d/evidence_toku_dilu`, založí ho instalace). Server se musí dostat na
+  `https://script.google.com`; instalace na to upozorní.
+
 ## Instalace a aktualizace (Ubuntu + Apache)
 
 ```bash
@@ -113,7 +145,8 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
 ```
 
 - Kód: `/var/www/evidence_toku_dilu`, data: `/var/lib/evidence_toku_dilu`, Apache:
-  `/etc/apache2/conf-available/evidence_toku_dilu.conf`. Ostatních aplikací se instalace nedotkne.
+  `/etc/apache2/conf-available/evidence_toku_dilu.conf`, cron: `/etc/cron.d/evidence_toku_dilu`
+  (odesílání do Google tabulek). Ostatních aplikací se instalace nedotkne.
 - Aplikace běží jen přes HTTPS (stejný virtuální host jako ostatní aplikace).
 - Před každou aktualizací se databáze zazálohuje do `/var/lib/evidence_toku_dilu/backups`
   (posledních 20). Nové tabulky si databáze doplní sama, data zůstanou.
@@ -126,6 +159,8 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
 ```bash
 # zapomenuté heslo (vypíše dočasné, po přihlášení se nastaví vlastní)
 sudo runuser -u www-data -- env ETD_DATA_DIR=/var/lib/evidence_toku_dilu php /var/www/evidence_toku_dilu/bin/reset-password.php LOGIN
+# odeslat změny do Google tabulek hned (jinak to dělá cron každou minutu)
+sudo runuser -u www-data -- env ETD_DATA_DIR=/var/lib/evidence_toku_dilu php /var/www/evidence_toku_dilu/bin/hook-worker.php --once
 # ruční záloha databáze
 sudo runuser -u www-data -- env ETD_DATA_DIR=/var/lib/evidence_toku_dilu php /var/www/evidence_toku_dilu/bin/backup-db.php
 ```
@@ -141,4 +176,5 @@ ETD_DATA_DIR=/tmp/etd php -S 127.0.0.1:8480 router.php   # http://127.0.0.1:8480
 python3 -m unittest discover -s tests                      # server a API
 node tests/test_scan.js                                    # funkce pro čtečku
 node tests/e2e.js                                          # průchod v Chromiu (Playwright)
+node tests/e2e_sheets.js                                   # živé propojení s Google tabulkou (náhradní Google)
 ```

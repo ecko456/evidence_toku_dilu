@@ -9,9 +9,9 @@ declare(strict_types=1);
  * Časy jsou v databázi jako unixové sekundy (UTC), ven jdou v pražském čase (ISO 8601).
  */
 
-const ETD_VERSION = '1.2.1';
+const ETD_VERSION = '1.3';
 /** Verze schématu databáze (PRAGMA user_version). Novou verzi doplň do etd_migrate(). */
-const ETD_SCHEMA = 2;
+const ETD_SCHEMA = 3;
 /** Zapisovat smí jen stránka aspoň téhle verze (hlavička X-Etd-Client), viz etd_require_client(). */
 const ETD_MIN_CLIENT = 1;
 const ETD_SESSION_COOKIE = 'etd_session';
@@ -183,7 +183,48 @@ SQL);
                 $pdo->exec('ALTER TABLE users ADD COLUMN pending_until INTEGER');
             }
         }
-        // Další verze schématu sem: if ($version < 3) { … }
+        if ($version < 3) {
+            // 1.3: živé propojení s Google tabulkou (lib/hooks.php). Jen nové tabulky.
+            $pdo->exec(<<<'SQL'
+-- Tabulka napojená přes API klíč (jedna na klíč): adresa webové aplikace a tajný kód pro podpis.
+CREATE TABLE IF NOT EXISTS hooks (
+    id INTEGER PRIMARY KEY,
+    api_key_id INTEGER NOT NULL UNIQUE REFERENCES api_keys(id),
+    url TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    watch_count INTEGER NOT NULL DEFAULT 0,
+    sent_count INTEGER NOT NULL DEFAULT 0,
+    last_ok_at INTEGER,
+    last_error TEXT,
+    last_error_at INTEGER,
+    fails INTEGER NOT NULL DEFAULT 0,
+    retry_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+-- Barcody, které tabulka sleduje.
+CREATE TABLE IF NOT EXISTS hook_watch (
+    hook_id INTEGER NOT NULL REFERENCES hooks(id) ON DELETE CASCADE,
+    barcode TEXT NOT NULL COLLATE NOCASE,
+    PRIMARY KEY (hook_id, barcode)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_hook_watch_barcode ON hook_watch(barcode);
+-- Co tabulce poslat (obsah se bere až při odeslání). ver roste s každou další změnou.
+CREATE TABLE IF NOT EXISTS hook_queue (
+    hook_id INTEGER NOT NULL REFERENCES hooks(id) ON DELETE CASCADE,
+    barcode TEXT NOT NULL COLLATE NOCASE,
+    ver INTEGER NOT NULL DEFAULT 1,
+    queued_at INTEGER NOT NULL,
+    PRIMARY KEY (hook_id, barcode)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+) WITHOUT ROWID;
+SQL);
+        }
+        // Další verze schématu sem: if ($version < 4) { … }
         $pdo->exec('PRAGMA user_version = ' . ETD_SCHEMA);
         $pdo->exec('COMMIT');
     } catch (Throwable $error) {
@@ -738,6 +779,7 @@ function etd_last(string $barcode): ?array
 /** Přepočítá poslední stav průvodky (po stornu). */
 function etd_refresh_part(string $barcode): void
 {
+    etd_hook_touch($barcode);
     $last = etd_one('SELECT * FROM records WHERE barcode = ? COLLATE NOCASE AND cancelled_at IS NULL ORDER BY id DESC LIMIT 1', [$barcode]);
     if ($last === null) {
         etd_exec('DELETE FROM parts WHERE barcode = ?', [$barcode]);
@@ -812,6 +854,7 @@ function etd_scan(array $session, string $action, array $items, string $position
             etd_exec('INSERT INTO parts (barcode, last_id, last_action, last_dept, updated_at) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(barcode) DO UPDATE SET last_id = excluded.last_id, last_action = excluded.last_action, last_dept = excluded.last_dept, updated_at = excluded.updated_at',
                 [$code, $id, $action, $dept, $now]);
+            etd_hook_touch($code);
             $record = etd_one('SELECT * FROM records WHERE id = ?', [$id]);
             $results[] = ['barcode' => $code, 'status' => 'ok', 'id' => $id, 'record' => etd_record_public($record),
                 'previous' => $last === null ? null : etd_record_public($last)];
@@ -884,3 +927,5 @@ function etd_api_key_check(string $key): ?array
     }
     return $row;
 }
+
+require __DIR__ . '/hooks.php';
