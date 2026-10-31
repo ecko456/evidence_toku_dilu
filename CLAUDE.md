@@ -13,7 +13,13 @@ Po každé větší práci **aktualizuj sekci „Kde jsme skončili“**.
 
 ## Kde jsme skončili
 
-Stav k 31. 10. 2026, verze **1.3.2** (schéma databáze 3):
+Stav k 31. 10. 2026, verze **1.3.3** (schéma databáze 3):
+
+- 1.3.3: úvodní stránka („pás, kde poběží názvy oddělení do ztracena, ať to je mrda na oko“).
+  Funkce `ticker` v `app.js`: dvě řady proti sobě (štítky s barevnou tečkou a velké obrysové
+  názvy), obsah dvakrát + posun o −50 % = smyčka bez skoku, na krajích maska do ztracena, při
+  najetí myší stojí, `prefers-reduced-motion` = jen statický výčet (`.rep` skryté). Opraveno:
+  v 1.3 přejmenování `.flow` → `.gflow` omylem rozbilo řadu oddělení na úvodní stránce.
 
 - 1.3.2: server odmítl adresu webové aplikace. `etd_hook_url_normalize` (a stejně skript) odstraní
   `/u/0/` (Google ho přidá při víc účtech v prohlížeči), `?…`, `#…`, mezery; chyba 400 teď ukáže,

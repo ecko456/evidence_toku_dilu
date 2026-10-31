@@ -56,6 +56,8 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     const page = await newPage();
     await page.goto(base + '/');
     await page.waitForSelector('#setupForm');
+    check((await page.getAttribute('.ticker', 'aria-label')) === 'Pracoviště: Broušení WPA, Brush WPA, Hala 2, Montáž, Elox, Studio, CNC Hala2', 'úvodní stránka: pás s pracovišti');
+    check(await page.evaluate(() => getComputedStyle(document.querySelector('.ticker-track')).animationName === 'ticker' && document.querySelector('.ticker-track').scrollWidth > document.querySelector('.ticker').clientWidth * 2), 'pás ujíždí a je delší než šířka (bez mezery ve smyčce)');
     const token = execFileSync('php', ['bin/setup-token.php'], { cwd: APP, env }).toString().trim();
     await page.fill('[name=token]', token.toLowerCase());
     await page.fill('[name=name]', 'Jana Správcová');

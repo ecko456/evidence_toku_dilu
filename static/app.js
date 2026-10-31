@@ -320,13 +320,29 @@
     renderApp();
   }
 
+  /** Pás s pracovišti, který na úvodní stránce ujíždí do ztracena (dvě řady proti sobě). */
+  function ticker(depts) {
+    if (!depts.length) return '';
+    // rep = opakování; bez animace (prefers-reduced-motion) se ukáže jen první výčet
+    const chip = (d, rep) => `<span class="tk dept-${esc(d.code)}${rep ? ' rep' : ''}"><i class="dot dept-${esc(d.code)}"></i>${esc(d.name)}</span>`;
+    const word = (d, rep) => `<span class="tk-word${rep ? ' rep' : ''}">${esc(d.name)}<i class="dot dept-${esc(d.code)}"></i></span>`;
+    // obsah dvakrát za sebou a posun o polovinu = nekonečná smyčka bez skoku; každá polovina
+    // je delší než pás (seznam se v ní opakuje), aby nevznikla mezera
+    const half = (items, fn, first) => { let h = ''; for (let i = 0; i < 3; i++) h += items.map(d => fn(d, !first || i > 0)).join(''); return h; };
+    const back = [...depts].reverse();
+    return `<div class="ticker" role="img" aria-label="Pracoviště: ${esc(depts.map(d => d.name).join(', '))}">
+      <div class="ticker-row"><div class="ticker-track" aria-hidden="true"><div>${half(depts, chip, true)}</div><div>${half(depts, chip)}</div></div></div>
+      <div class="ticker-row rev"><div class="ticker-track" aria-hidden="true"><div>${half(back, word)}</div><div>${half(back, word)}</div></div></div>
+    </div>`;
+  }
+
   function welcome(inner) {
     app.innerHTML = `<div class="welcome">
       <section class="welcome-hero">
         ${logo}
         <h1>Evidence toku dílů</h1>
         <p>Příjem a export průvodek na pracovištích. Načti barcode čtečkou a systém zapíše, kde díly jsou, kdo je převzal a kolik kusů odešlo.</p>
-        <div class="gflow" aria-label="Pracoviště">${(ST.depts || []).map(d => `<span>${deptDot(d.code)}${esc(d.name)}</span>`).join('')}</div>
+        ${ticker(ST.depts || [])}
       </section>
       <section class="welcome-side">${inner}</section></div>`;
   }
