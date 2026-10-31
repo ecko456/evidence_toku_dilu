@@ -13,11 +13,13 @@ Po každé větší práci **aktualizuj sekci „Kde jsme skončili“**.
 
 ## Kde jsme skončili
 
-Stav k 31. 10. 2026, verze **1.3.3** (schéma databáze 3):
+Stav k 31. 10. 2026, verze **1.3.4** (schéma databáze 3):
+
+- 1.3.4: v pásu na úvodní stránce zůstala jen řada štítků („nechal bych tam jen tu jednu verzi
+  v těch buňkách“); obrysové velké názvy pryč.
 
 - 1.3.3: úvodní stránka („pás, kde poběží názvy oddělení do ztracena, ať to je mrda na oko“).
-  Funkce `ticker` v `app.js`: dvě řady proti sobě (štítky s barevnou tečkou a velké obrysové
-  názvy), obsah dvakrát + posun o −50 % = smyčka bez skoku, na krajích maska do ztracena, při
+  Funkce `ticker` v `app.js`: řada štítků s barevnou tečkou, obsah dvakrát + posun o −50 % = smyčka bez skoku, na krajích maska do ztracena, při
   najetí myší stojí, `prefers-reduced-motion` = jen statický výčet (`.rep` skryté). Opraveno:
   v 1.3 přejmenování `.flow` → `.gflow` omylem rozbilo řadu oddělení na úvodní stránce.
 
