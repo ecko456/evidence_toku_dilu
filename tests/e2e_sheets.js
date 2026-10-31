@@ -48,7 +48,7 @@ async function page(action, body) {
 }
 const php = (...args) => execFileSync('php', args, { cwd: APP, env: ENV }).toString();
 const worker = () => php('bin/hook-worker.php', '--once');
-const sheetK = row => (load(STATE).sheets.List1['K' + row] || {});
+const sheetK = row => (load(STATE).sheets['List 1']['K' + row] || {});
 const run = (fn, ...args) => makeEnv(STATE, fs.readFileSync(SCRIPT, 'utf8'))[fn](...args);
 const lastAlert = () => { const a = load(STATE).alerts || []; return a[a.length - 1] || ''; };
 const answer = (...a) => { const s = load(STATE); s.answers = a; save(STATE, s); };
@@ -71,7 +71,8 @@ const ETD = { api: '${BASE}/api/v1/', list: 'List1', sloupecBarcode: 'D', parame
   save(STATE, {
     props: {}, triggers: [], answers: [], alerts: [], googleMode: 'ok',
     sheets: {
-      List1: {
+      Poznámky: { A1: { v: 'jiný list' } },
+      'List 1': {   // česká tabulka: s mezerou; ve skriptu je 'List1', najde se i tak
         D1: { v: 'Odkaz' }, K1: { v: 'Evidence' },
         D2: { v: 'Zakázka 1', link: link('12345.678901.23456') },                 // odkaz vložený přes Ctrl+K
         D3: { f: `=HYPERLINK("${link('12345.678901.23457')}";"Zakázka 2")`, computed: 'Zakázka 2' },
@@ -93,6 +94,15 @@ const ETD = { api: '${BASE}/api/v1/', list: 'List1', sloupecBarcode: 'D', parame
   await page('dept', { dept: 'hala' });
   await page('scan', { action: 'prijem', items: [{ barcode: '12345.678901.23456' }, { barcode: '12345.678901.23457' }], position: 'R3', definePosition: true });
   const key = (await page('apikey_create', { name: 'Kooperace Hala 2' })).key;
+
+  // 0) špatný název listu: chyba vyjmenuje listy v tabulce
+  const wrong = fs.readFileSync(SCRIPT, 'utf8').replace("list: 'List1'", "list: 'Kooperace'");
+  try {
+    require('./gas_mock').makeEnv(STATE, wrong).etdList();
+    assert.fail('chybný list měl skončit chybou');
+  } catch (err) {
+    assert.match(err.message, /List „Kooperace“ v tabulce není\. Listy v tabulce: „Poznámky“, „List 1“\./, err.message);
+  }
 
   // 1) klíč
   answer('etd_' + '0'.repeat(39));
@@ -136,10 +146,10 @@ const ETD = { api: '${BASE}/api/v1/', list: 'List1', sloupecBarcode: 'D', parame
   assert.match(sheetK(2).v, /^Příjem na pracoviště · Hala 2 · pozice R3/);
 
   // 5) nový odkaz ve sloupci D: spouštěč při úpravě pošle nový seznam a doplní výsledek
-  setState(s => { s.sheets.List1.D7 = { v: 'Zakázka 7', link: link('NESLEDOVANA-9') }; });
-  run('etdPriUprave', { range: makeEnv(STATE, fs.readFileSync(SCRIPT, 'utf8')).__range('List1', 7, 4, 1) });
+  setState(s => { s.sheets['List 1'].D7 = { v: 'Zakázka 7', link: link('NESLEDOVANA-9') }; });
+  run('etdPriUprave', { range: makeEnv(STATE, fs.readFileSync(SCRIPT, 'utf8')).__range('List 1', 7, 4, 1) });
   assert.match(sheetK(7).v, /^Příjem na pracoviště · Elox/);
-  run('etdPriUprave', { range: makeEnv(STATE, fs.readFileSync(SCRIPT, 'utf8')).__range('List1', 7, 5, 1) });   // jiný sloupec: nic
+  run('etdPriUprave', { range: makeEnv(STATE, fs.readFileSync(SCRIPT, 'utf8')).__range('List 1', 7, 5, 1) });   // jiný sloupec: nic
 
   // 6) Správa vidí propojení a jeho stav
   let hooks = await page('hooks');

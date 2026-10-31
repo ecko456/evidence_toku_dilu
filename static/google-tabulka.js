@@ -1,5 +1,5 @@
 /**
- * Evidence toku dílů → Google tabulka: živé propojení (verze 1.3)
+ * Evidence toku dílů → Google tabulka: živé propojení (verze 1.3.1)
  *
  * Skript najde ve sloupci s barcody (nebo s odkazy, ve kterých je barcode) průvodky, pošle jejich
  * seznam do Evidence a do výsledkového sloupce zapíše poslední záznam. Když pak někdo průvodku
@@ -15,7 +15,7 @@
 // <nastaveni>
 const ETD = {
   api: 'https://SERVER/evidence_toku_dilu/api/v1/', // adresa API Evidence
-  list: 'List1',                                    // název listu (záložka dole)
+  list: 'List 1',                                   // název listu (záložka dole)
   sloupecBarcode: 'D',                              // sloupec s barcodem nebo s odkazem
   parametrOdkazu: 'activeBarcode',                  // barcode je v odkazu za „activeBarcode=“; '' = barcode je přímo text buňky
   sloupecVysledek: 'K',                             // sem se zapíše poslední záznam
@@ -145,7 +145,7 @@ function etdVypnout() {
 /** Po změně ve sloupci s barcody pošle Evidenci nový seznam (a doplní výsledky). */
 function etdPriUprave(e) {
   const r = e && e.range;
-  if (!r || r.getSheet().getName() !== ETD.list) return;
+  if (!r || r.getSheet().getName() !== etdList().getName()) return;
   const col = etdSloupec(ETD.sloupecBarcode);
   if (r.getColumn() > col || r.getLastColumn() < col) return;
   etdSync(false);
@@ -312,8 +312,18 @@ function etdList() {
   let ss = null;
   try { ss = SpreadsheetApp.getActive(); } catch (err) { ss = null; }
   if (!ss && id) ss = SpreadsheetApp.openById(id);
-  const sheet = ss && ss.getSheetByName(ETD.list);
-  if (!sheet) throw new Error('List „' + ETD.list + '“ v tabulce není. Oprav ETD.list nahoře ve skriptu.');
+  if (!ss) throw new Error('Tabulku se nepodařilo otevřít. V tabulce dej znovu Evidence → Zapnout živé propojení.');
+  let sheet = ss.getSheetByName(ETD.list);
+  if (!sheet) {
+    // „List1“ najde i „List 1“ (česká tabulka má mezeru) a nehraje roli velikost písmen
+    const norm = name => String(name).toLowerCase().replace(/\s+/g, '');
+    const found = ss.getSheets().filter(s => norm(s.getName()) === norm(ETD.list));
+    sheet = found.length === 1 ? found[0] : null;
+  }
+  if (!sheet) {
+    const names = ss.getSheets().map(s => '„' + s.getName() + '“').join(', ');
+    throw new Error('List „' + ETD.list + '“ v tabulce není. Listy v tabulce: ' + names + '. Oprav ETD.list nahoře ve skriptu (přesně jako záložka dole) a ulož (Ctrl+S).');
+  }
   return sheet;
 }
 

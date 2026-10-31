@@ -63,6 +63,7 @@ function makeEnv(stateFile, scriptCode) {
       getId: () => 'tabulka-1',
       getName: () => 'Kooperace',
       getSheetByName: n => (st().sheets[n] ? sheet(n) : null),
+      getSheets: () => Object.keys(st().sheets).map(sheet),
       toast: (text) => upd(s => { (s.toasts = s.toasts || []).push(text); }),
     };
   }

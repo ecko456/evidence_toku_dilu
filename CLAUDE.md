@@ -13,7 +13,12 @@ Po každé větší práci **aktualizuj sekci „Kde jsme skončili“**.
 
 ## Kde jsme skončili
 
-Stav k 31. 10. 2026, verze **1.3** (schéma databáze 3):
+Stav k 31. 10. 2026, verze **1.3.1** (schéma databáze 3):
+
+- 1.3.1: uživateli skript hlásil „List „List1“ v tabulce není“: česká Google tabulka má první
+  list **„List 1“** (s mezerou). Výchozí název v generátoru je teď „List 1“, `etdList` najde list
+  i bez ohledu na mezery a velikost písmen a v chybě vyjmenuje listy tabulky. Pozor: po změně
+  kódu v Apps Scriptu musí uživatel udělat novou verzi nasazení (doPost jede z nasazené verze).
 
 - 1.3: **živé propojení s Google tabulkou** („ať google tabulka přes API sdílí soupis barcodů a při
   shodě se propíšou data“, „ať je to šupa“). Uživatel měl předtím ruční Apps Script (barcode

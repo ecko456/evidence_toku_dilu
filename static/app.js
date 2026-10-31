@@ -1314,7 +1314,7 @@
       },
     };
     const pre = (text) => `<div class="pre"><pre>${esc(text)}</pre><button class="btn small copy" type="button" data-copy>Kopírovat</button></div>`;
-    const gs = Object.assign({ list: 'List1', col: 'D', link: true, param: 'activeBarcode', out: 'K', row: 2 }, store.get('gsheet', {}));
+    const gs = Object.assign({ list: 'List 1', col: 'D', link: true, param: 'activeBarcode', out: 'K', row: 2 }, store.get('gsheet', {}));
     view.innerHTML = `<div class="stack-18"><section class="card sheets" id="gsheet">
       <div class="card-head"><div><p class="eyebrow">Novinka ve verzi 1.3</p><h1>Google tabulka: živé propojení</h1>
         <p class="hint mt-4">Tabulka řekne Evidenci, které průvodky sleduje, a Evidence do ní sama zapíše každý příjem, export i storno. Do pár sekund, bez obnovování.</p></div></div>
@@ -1327,7 +1327,7 @@
       </div>
       <h3>1. Kde v tabulce co je</h3>
       <form class="gs-form" autocomplete="off" novalidate>
-        <label class="field"><span>Název listu</span><input class="input" name="list" maxlength="100" value="${esc(gs.list)}" required></label>
+        <label class="field"><span>Název listu <span class="muted">(záložka dole, přesně)</span></span><input class="input" name="list" maxlength="100" value="${esc(gs.list)}" required></label>
         <label class="field"><span>Sloupec s barcodem</span><input class="input mono" name="col" maxlength="3" value="${esc(gs.col)}" required></label>
         <label class="field"><span>Výsledek do sloupce</span><input class="input mono" name="out" maxlength="3" value="${esc(gs.out)}" required></label>
         <label class="field"><span>První řádek s daty</span><input class="input" name="row" type="number" min="1" max="1000" value="${esc(gs.row)}" required></label>
