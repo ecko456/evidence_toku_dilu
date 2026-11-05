@@ -311,6 +311,15 @@ class ScanTests(Base):
         self.assertEqual(r["record"]["quantity"], 48)
         self.assertEqual(r["previous"]["action"], "prijem")
         self.assertIsNone(r["record"]["position"], "export pozici nemá")
+        self.assertFalse(r["record"]["complete"])
+        # 1.7: kompletní export bez počtu kusů
+        status, data = self.admin.scan("export", [{"barcode": "PR-1", "complete": True, "qty": "0"}])
+        self.assertEqual(data["results"][0]["status"], "error", "complete s neplatným počtem kusů se nezapíše")
+        status, data = self.admin.scan("export", [{"barcode": "PR-1", "complete": True}], force=True)
+        r = data["results"][0]
+        self.assertEqual(r["status"], "ok", r)
+        self.assertIsNone(r["record"]["quantity"])
+        self.assertTrue(r["record"]["complete"])
 
     def test_batch_with_position_and_repeats(self):
         status, data = self.admin.scan("prijem", [{"barcode": "A"}], position="", define=True)

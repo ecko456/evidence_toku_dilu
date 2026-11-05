@@ -1,97 +1,81 @@
-/* Evidence toku dílů: vzhled. Barvy jsou tokeny na :root, tmavý režim je má vlastní. */
+/* Evidence toku dílů: vzhled. Barvy jsou tokeny na :root (jeden tmavý „skleněný“ vzhled, od 1.7). */
 
+/* Písmo Plus Jakarta Sans (SIL OFL 1.1, licence v static/fonts/), přibalené: CSP nepovoluje cizí písma. */
+@font-face { font-family: "Plus Jakarta Sans"; font-style: normal; font-weight: 200 800; font-display: swap;
+  src: url("fonts/plus-jakarta-sans-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Plus Jakarta Sans"; font-style: normal; font-weight: 200 800; font-display: swap;
+  src: url("fonts/plus-jakarta-sans-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+
+/* Vzhled 2.0 (od verze 1.7): tmavé „sklo“ s teplou oranžovou podle návrhu dashbordv11.
+   Jeden tmavý režim pro všechny (návrh je jen tmavý); barvy oddělení jsou tmavé varianty
+   kategorické palety (ověřené pro tmavý podklad). Urgent zůstává jasně červený, oranžová
+   je jen pro ovládání (aktivní záložka, hlavní tlačítko). */
 :root {
-  --bg: #eef2f5;
-  --surface: #ffffff;
-  --surface-2: #f6f8fa;
-  --surface-3: #e9eef2;
-  --ink: #0e1b25;
-  --ink-2: #384955;
-  --ink-3: #66757f;
-  --line: #d8e0e6;
-  --line-2: #c3ced6;
-  --brand: #0f2a3d;
-  --brand-2: #173d57;
-  --brand-ink: #f2f7fa;
-  --accent: #0b7285;
+  --bg: #0b0c10;
+  --surface: rgba(30, 32, 40, .64);        /* karta: průsvitné sklo */
+  --surface-2: rgba(255, 255, 255, .05);
+  --surface-3: rgba(255, 255, 255, .09);
+  --surface-solid: #1a1c23;                 /* dialogy a nabídky: neprůhledné sklo */
+  --field: rgba(8, 9, 13, .45);             /* pole formulářů */
+  --ink: #ffffff;
+  --ink-2: #c0c3d2;
+  --ink-3: #9498a5;
+  --line: rgba(255, 255, 255, .10);
+  --line-2: rgba(255, 255, 255, .18);
+  --brand: rgba(14, 15, 20, .62);
+  --brand-2: #1c1e26;
+  --brand-ink: #ffffff;
+  --accent: #ff7a22;
+  --accent-2: #ee5300;
   --accent-ink: #ffffff;
-  --focus: #1c7ed6;
-  --ok: #1d7a45;
-  --ok-bg: #e3f3e9;
-  --warn: #9a5b00;
-  --warn-bg: #fcf1d8;
-  --crit: #b8322a;
-  --crit-bg: #fbe8e6;
-  --urgent: #b8322a;          /* pás a odznak urgentů: bílý text, stejně sytá v obou režimech */
-  --prijem: #0f766e;
-  --prijem-bg: #dff3f0;
-  --export: #4338ca;
-  --export-bg: #e7e8fb;
-  /* oddělení: kategorická paleta v pevném pořadí (ověřená validátorem dataviz), vždy s názvem */
-  --d-1: #2a78d6;
-  --d-2: #eb6834;
-  --d-3: #1baf7a;
-  --d-4: #eda100;
-  --d-5: #e87ba4;
+  --accent-glow: rgba(238, 83, 0, .5);
+  --focus: #ffa45c;
+  --ok: #26c281;
+  --ok-bg: rgba(38, 194, 129, .14);
+  --warn: #f0b54a;
+  --warn-bg: rgba(240, 181, 74, .14);
+  --crit: #ff6b61;
+  --crit-bg: rgba(245, 67, 54, .16);
+  --urgent: #d92d20;          /* pás a odznak urgentů: bílý text */
+  --prijem: #2cd5c4;
+  --prijem-bg: rgba(44, 213, 196, .13);
+  --export: #a3a9ff;
+  --export-bg: rgba(154, 162, 255, .15);
+  /* oddělení: kategorická paleta v pevném pořadí (tmavé varianty ověřené validátorem dataviz), vždy s názvem */
+  --d-1: #3987e5;
+  --d-2: #d95926;
+  --d-3: #199e70;
+  --d-4: #c98500;
+  --d-5: #d55181;
   --d-6: #008300;
-  --d-7: #6250d6;
-  --d-visitor: #5b6b78;
-  --shadow: 0 1px 2px rgba(15, 42, 61, .06), 0 4px 16px rgba(15, 42, 61, .06);
-  --radius: 14px;
-  --radius-s: 9px;
+  --d-7: #9085e9;
+  --d-visitor: #98a8b4;
+  --shadow: 0 24px 50px -14px rgba(0, 0, 0, .55), inset 0 1px 1px rgba(255, 255, 255, .14);
+  --radius: 22px;
+  --radius-s: 12px;
   --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, "Liberation Mono", monospace;
-  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0b141b;
-    --surface: #121e27;
-    --surface-2: #17252f;
-    --surface-3: #1d2e3a;
-    --ink: #e8eef2;
-    --ink-2: #b7c4cd;
-    --ink-3: #8696a2;
-    --line: #253744;
-    --line-2: #33495a;
-    --brand: #0a1c29;
-    --brand-2: #12324a;
-    --accent: #3bb3c4;
-    --accent-ink: #06232a;
-    --focus: #5aa9f0;
-    --ok: #5fcf8d;
-    --ok-bg: #12301f;
-    --warn: #f0b54a;
-    --warn-bg: #33270e;
-    --crit: #f2837a;
-    --crit-bg: #3a1714;
-    --urgent: #a8261e;
-    --prijem: #4fd1c1;
-    --prijem-bg: #0f2f2c;
-    --export: #9aa2ff;
-    --export-bg: #1e2148;
-    --d-1: #3987e5;
-    --d-2: #d95926;
-    --d-3: #199e70;
-    --d-4: #c98500;
-    --d-5: #d55181;
-    --d-6: #008300;
-    --d-7: #9085e9;
-    --d-visitor: #98a8b4;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 18px rgba(0, 0, 0, .25);
-    color-scheme: dark;
-  }
+  --sans: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
-  background: var(--bg);
+  /* teplé oranžové světlo na tmavém podkladu (jako podsvícení v návrhu), bez obrázku */
+  background:
+    radial-gradient(1100px 620px at 78% 8%, rgba(255, 122, 34, .20), transparent 62%),
+    radial-gradient(900px 600px at 6% 100%, rgba(255, 115, 34, .13), transparent 60%),
+    radial-gradient(1400px 900px at 40% 50%, rgba(44, 213, 196, .035), transparent 70%),
+    linear-gradient(180deg, #101116 0%, #0b0c10 100%);
+  background-attachment: fixed;
+  background-color: var(--bg);
   color: var(--ink);
   font: 16px/1.45 var(--sans);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 h1, h2, h3 { margin: 0; line-height: 1.2; }
 h1 { font-size: 1.6rem; letter-spacing: -.01em; }
@@ -610,3 +594,128 @@ tr.u-there td { background: color-mix(in srgb, var(--crit) 7%, transparent); }
 .grid-2.tight { gap: 0 16px; }
 .btn.on-dark { color: inherit; }
 .btn.on-dark:hover { background: rgba(255,255,255,.12); }
+
+/* ======================================================================
+   Vzhled 2.0: sklo (od 1.7). Průsvitné panely, oranžová pro ovládání.
+   Rozmazání (backdrop-filter) jen na hlavičce, záložkách, přihlášení
+   a dialozích: karty ho nepotřebují (pozadí je hladké) a slabší tablety
+   na pracovištích by se zbytečně zpomalily.
+   ====================================================================== */
+::selection { background: rgba(255, 122, 34, .35); }
+h1, h2, h3 { letter-spacing: -.015em; }
+h1 { font-weight: 800; }
+
+/* panely */
+.card, .tile, .last-card, .login-card {
+  background: linear-gradient(135deg, rgba(255, 255, 255, .085) 0%, rgba(26, 28, 35, .62) 42%, rgba(16, 17, 22, .66) 100%);
+  border: 1px solid rgba(255, 255, 255, .14);
+  box-shadow: var(--shadow);
+}
+.card { border-radius: var(--radius); padding: 22px; }
+.login-card { border-radius: 28px; backdrop-filter: blur(24px) saturate(160%); -webkit-backdrop-filter: blur(24px) saturate(160%); }
+.form-note { background: var(--surface-2); border-color: var(--line); }
+
+/* tlačítka: zaoblené „pilulky“, hlavní oranžové s přechodem a září */
+.btn { border-radius: 999px; padding: 8px 18px; background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .16); }
+.btn:hover { background: rgba(255, 255, 255, .13); }
+.btn.primary, .scan .btn.primary, .scan .qty-panel .btn.primary {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%); border-color: transparent; color: var(--accent-ink);
+  box-shadow: 0 4px 18px var(--accent-glow);
+}
+.btn.primary:hover { filter: brightness(1.08); box-shadow: 0 6px 22px var(--accent-glow); }
+.btn.danger { background: linear-gradient(135deg, #f54336, #c62a1d); border-color: transparent; box-shadow: 0 4px 16px rgba(245, 67, 54, .35); }
+.btn.ghost { background: transparent; border-color: transparent; }
+.btn.ghost:hover { background: rgba(255, 255, 255, .1); }
+.btn.big { min-height: 56px; }
+
+/* pole */
+.input, .field input[type="text"], .field input[type="password"], .field input[type="search"], .field select,
+.pos-input, .qty-input, .row-qty, .fill-qty input, .filters select {
+  background: var(--field); border-color: rgba(255, 255, 255, .16); color: var(--ink);
+}
+.input, .field input, .field select, .pos-input, .filters select { border-radius: var(--radius-s); }
+.scan-input { background: var(--field); border-color: rgba(255, 255, 255, .18); border-radius: 18px; }
+.scan-input:focus { background: rgba(8, 9, 13, .62); }
+.qty-input { background: var(--field); }
+.switch .track { background: rgba(255, 255, 255, .18); }
+.switch input:checked + .track { background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 0 12px var(--accent-glow); }
+
+/* hlavička a záložky: sklo s rozmazáním, aktivní záložka jako oranžová pilulka */
+.top { background: var(--brand); border-bottom: 1px solid rgba(255, 255, 255, .08); backdrop-filter: blur(22px) saturate(170%); -webkit-backdrop-filter: blur(22px) saturate(170%); }
+.tabs { background: rgba(14, 15, 20, .55); border-bottom: 1px solid rgba(255, 255, 255, .08); backdrop-filter: blur(22px) saturate(170%); -webkit-backdrop-filter: blur(22px) saturate(170%); }
+.tabs-in { gap: 6px; padding: 8px 12px; }
+.tab { padding: 9px 16px; border: 0; border-radius: 999px; color: rgba(255, 255, 255, .68); transition: background .2s, color .2s; }
+.tab:hover { color: #fff; background: rgba(255, 255, 255, .1); }
+.tab.on, .tab.t-prijem.on, .tab.t-export.on { color: #fff; background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%); box-shadow: 0 4px 16px var(--accent-glow); }
+.dept-pill { background: rgba(255, 255, 255, .07); border-color: rgba(255, 255, 255, .16); }
+.avatar { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; }
+.menu { background: var(--surface-solid); border-color: rgba(255, 255, 255, .14); border-radius: 18px; box-shadow: 0 18px 40px rgba(0, 0, 0, .55); }
+.menu button:hover { background: rgba(255, 255, 255, .08); }
+
+/* úvodní stránka: bez tmavomodrého bloku, nápis a pás přímo na teplém pozadí */
+.welcome-hero { background: none; }
+.welcome-hero p { color: var(--ink-2); }
+.welcome-hero h1 { font-weight: 800; }
+
+/* výběr oddělení */
+.tile { border-radius: var(--radius); border-top: 4px solid var(--dept); }
+.tile:hover:not(:disabled) { background: linear-gradient(135deg, rgba(255, 255, 255, .12) 0%, rgba(30, 32, 40, .66) 50%); border-color: rgba(255, 255, 255, .24); border-top-color: var(--dept); }
+.tile .num { color: rgba(255, 255, 255, .38); }
+
+/* skenování: barva akce zůstává (příjem tyrkysová, export fialová), hlavní tlačítko oranžové */
+.scan { border-top: 4px solid var(--act, var(--accent)); }
+.qty-panel { border-radius: 18px; }
+.result { border-radius: 18px; }
+
+/* přehled */
+.last-card { border: 1px solid rgba(255, 122, 34, .55); box-shadow: var(--shadow), 0 0 0 1px rgba(255, 122, 34, .12), 0 10px 40px -12px rgba(255, 122, 34, .35); }
+.last-card .lc-head { background: rgba(255, 122, 34, .08); }
+.tbl tr.is-last td { background: rgba(255, 122, 34, .07); }
+.tbl th { color: var(--ink-3); }
+.count { background: rgba(255, 255, 255, .1); }
+
+/* na pracovištích a správa */
+.onsite-card { border-top: 4px solid var(--dept); }
+.hook, .hook-stats div, .gflow-step, .gs-demo, .gs-cell, .asm-row { background: rgba(255, 255, 255, .045); border-color: rgba(255, 255, 255, .12); }
+.gflow-step.hub { background: linear-gradient(135deg, rgba(255, 122, 34, .28), rgba(238, 83, 0, .12)); border-color: rgba(255, 122, 34, .55); box-shadow: 0 0 24px -6px var(--accent-glow); }
+.pre pre { background: rgba(5, 6, 9, .7); border: 1px solid rgba(255, 255, 255, .08); border-radius: 14px; }
+.choice label { border-radius: 14px; background: rgba(255, 255, 255, .03); }
+.choice label:has(input:checked) { background: rgba(255, 122, 34, .1); }
+
+/* dialogy, oznámení */
+dialog.dlg { background: var(--surface-solid); border: 1px solid rgba(255, 255, 255, .14); border-radius: 24px; box-shadow: 0 30px 80px rgba(0, 0, 0, .65), inset 0 1px 1px rgba(255, 255, 255, .12); }
+dialog.dlg::backdrop { background: rgba(5, 6, 9, .6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.toast { background: rgba(26, 28, 35, .92); border: 1px solid rgba(255, 255, 255, .14); border-radius: 16px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); color: #fff; }
+.toast.ok { border-color: rgba(38, 194, 129, .5); }
+
+/* urgenty: sytě červené, ať se nepletou s oranžovou */
+.urgent-bar { background: linear-gradient(135deg, #e5362a 0%, #b4231a 100%); box-shadow: 0 10px 30px -8px rgba(229, 54, 42, .55); }
+.tile-urgent { background: var(--urgent); box-shadow: 0 0 14px rgba(217, 45, 32, .55); }
+
+@media (max-width: 760px) {
+  .tabs-in { padding: 6px 8px; }
+  .tab { padding: 8px 13px; }
+  .card { padding: 16px 14px; border-radius: 18px; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .card, .tile, .last-card, .login-card { background: #1a1c23; }
+  .top, .tabs { background: #111217; backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+/* plné výstražné plochy: tmavší červená, ať je bílý text čitelný */
+.toast.err { background: rgba(180, 35, 26, .95); border-color: rgba(255, 107, 97, .6); }
+.toast.warn { background: rgba(122, 74, 0, .95); }
+.result.err .ico, .result.urgent .ico { background: var(--urgent); color: #fff; }
+
+/* export: Kompletní / Část (od 1.7) */
+.exp-mode { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.exp-mode label { flex: 1 1 220px; display: flex; gap: 12px; align-items: center; padding: 14px 16px; border: 1px solid rgba(255, 255, 255, .16); border-radius: 16px; background: rgba(255, 255, 255, .04); cursor: pointer; transition: background .15s, border-color .15s; }
+.exp-mode label:hover { background: rgba(255, 255, 255, .08); }
+.exp-mode label:has(input:checked) { border-color: var(--act, var(--accent)); background: color-mix(in srgb, var(--act, var(--accent)) 16%, transparent); box-shadow: 0 0 0 1px var(--act, var(--accent)) inset; }
+.exp-mode label:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
+.exp-mode input { width: 22px; height: 22px; accent-color: var(--act, var(--accent)); flex: none; }
+.exp-mode b { display: block; font-size: 1.08rem; }
+.exp-mode small { display: block; color: var(--ink-3); }
+.qty-box { display: inline-flex; gap: 10px; align-items: center; flex-wrap: nowrap; }
+.qty-box .qty-input { min-width: 0; width: calc(7ch + 32px); }
+.qty-box[hidden] { display: none; }
+.row-qty::placeholder { color: var(--ink-3); font-size: .85em; }

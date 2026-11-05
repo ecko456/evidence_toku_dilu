@@ -128,7 +128,7 @@
       <div class="asm-list">${list.map(p => { const l = p.last; const there = l && l.action === 'prijem';
         return `<div class="asm-row${there ? ' there' : ''}">${partTitle(p.barcode, p.info)}
           <span>${l ? (there ? deptTag(l.department, l.department_label) : `<span class="muted">${esc(l.action_label)} · ${esc(l.department_label)}</span>`) : '<span class="muted">zatím nikde</span>'}</span>
-          <span>${there && l.position ? `pozice <b>${esc(l.position)}</b>` : l && l.quantity != null ? `${num(l.quantity)} ks` : ''}</span>
+          <span>${there && l.position ? `pozice <b>${esc(l.position)}</b>` : l ? qtyText(l) : ''}</span>
           <span class="muted small">${l ? esc(agoUnix(l.recorded_at_unix)) : ''}</span></div>`; }).join('')}</div></details>`;
   }
 
@@ -164,7 +164,9 @@
   }
   const initials = name => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
   const logo = '<img class="logo" src="static/icon.svg" alt="">';
-  const recLine = r => `${r.action_label} · ${esc(r.department_label)}${r.position ? ` · pozice <b>${esc(r.position)}</b>` : ''}${r.quantity != null ? ` · <b>${num(r.quantity)} ks</b>` : ''}`;
+  /** Množství u exportu: počet kusů (část), nebo „kompletní“ (od 1.7 bez počtu kusů). */
+  const qtyText = r => r.quantity != null ? `<b>${num(r.quantity)} ks</b>` : r.action === 'export' ? '<b>kompletní</b>' : '';
+  const recLine = r => `${r.action_label} · ${esc(r.department_label)}${r.position ? ` · pozice <b>${esc(r.position)}</b>` : ''}${qtyText(r) ? ` · ${qtyText(r)}` : ''}`;
 
   /**
    * Dialog s formulářem. validate(form) vrátí chybu (text), nebo null; smí být async
@@ -723,8 +725,8 @@
     function syncTexts() {
       $('#scanBtn').textContent = opts.multi ? 'Přidat' : isIn ? 'Přijmout' : 'Pokračovat';
       $('#scanHint').textContent = opts.multi
-        ? `Načítej průvodky jednu po druhé. ${isIn ? '' : 'U každé zadej počet kusů. '}Nakonec klikni na Zapsat vše.`
-        : isIn ? 'Po načtení se příjem hned zapíše.' : 'Po načtení zadej počet kusů a potvrď Enterem.';
+        ? `Načítej průvodky jednu po druhé. ${isIn ? '' : 'Prázdný počet kusů = kompletní, u části ho vyplň. '}Nakonec klikni na Zapsat vše.`
+        : isIn ? 'Po načtení se příjem hned zapíše.' : 'Po načtení vyber Kompletní (výchozí), nebo Část s počtem kusů, a potvrď Enterem.';
       batchBox.hidden = !opts.multi;
     }
     let viaCamera = false;   // poslední kód z fotoaparátu: pole nefokusovat, na telefonu by vyjela klávesnice
@@ -750,7 +752,7 @@
         const rec = r.record, prev = r.previous;
         showResult(r.urgent ? 'urgent' : 'ok', isIn ? `Přijato na pracoviště ${ST.deptName}` : `Export z pracoviště ${ST.deptName}`, [
           r.urgent ? `<span class="tag crit">⚡ URGENT</span> ${r.urgent.of ? `Poddíl urgentní sestavy <b>${esc(r.urgent.of)}</b>. ` : ''}${isIn ? 'Svítí na pracovišti, dokud průvodku neexportuješ.' : 'Urgent odešel z pracoviště.'}${r.urgent.note ? ` <b>${esc(r.urgent.note)}</b>` : ''}` : '',
-          rec.position ? `Pozice: <b>${esc(rec.position)}</b>` : '', rec.quantity != null ? `Počet: <b>${num(rec.quantity)} ks</b>` : '',
+          rec.position ? `Pozice: <b>${esc(rec.position)}</b>` : '', rec.quantity != null ? `Část: <b>${num(rec.quantity)} ks</b>` : rec.action === 'export' ? 'Export: <b>kompletní</b>' : '',
           prev ? `Předtím: ${recLine(prev)} · ${esc(agoUnix(prev.recorded_at_unix))}` : 'První záznam této průvodky.',
           partExtra(r.info),
         ].filter(Boolean), rec.barcode, `<span class="muted small">zapsáno ${esc(when(rec.recorded_at))}</span>`, r.info);
@@ -777,7 +779,7 @@
       if (needPosition()) return;
       busy = true;
       try {
-        const data = await api('scan', { action, items: items.map(x => ({ barcode: x.code, qty: isIn ? undefined : SC.qty(x.qty, ST.limits.qty) })), position: position(), definePosition: isIn && opts.pos, force: !!force });
+        const data = await api('scan', { action, items: items.map(x => isIn ? { barcode: x.code } : String(x.qty || '').trim() === '' ? { barcode: x.code, complete: true } : { barcode: x.code, qty: SC.qty(x.qty, ST.limits.qty) }), position: position(), definePosition: isIn && opts.pos, force: !!force });
         return data;
       } catch (err) {
         showResult('err', 'Nezapsáno', [esc(err.message)]);
@@ -799,14 +801,26 @@
     }
 
     function askQty(code) {
+      // od 1.7: výchozí je kompletní export (bez počtu kusů); „Část“ otevře pole pro počet kusů s fokusem
       pending = { code };
       qtyPanel.hidden = false;
       qtyPanel.innerHTML = `<form id="qtyForm" novalidate><p class="eyebrow">Export průvodky</p><div id="qtyCode">${partBig(code, partCache.get(code.toLowerCase()))}</div>
         <p class="small muted" id="qtyInfo">Načítám poslední záznam…</p>
-        <div class="qty-row"><label for="qtyInput" class="unit">Počet kusů</label><input id="qtyInput" class="qty-input" type="text" inputmode="numeric" autocomplete="off" maxlength="9"><span class="unit">ks</span>
-          <button class="btn primary big" type="submit">Zapsat export</button><button class="btn ghost" type="button" data-qcancel>Zrušit (Esc)</button></div></form>`;
-      const qf = $('#qtyForm'), qi = $('#qtyInput');
-      qi.focus();
+        <div class="exp-mode" role="radiogroup" aria-label="Co z pracoviště odchází">
+          <label><input type="radio" name="expMode" value="all" checked><span><b>Kompletní</b><small>odchází všechno</small></span></label>
+          <label><input type="radio" name="expMode" value="part"><span><b>Část, ještě něco zůstane</b><small>zadáš počet kusů</small></span></label>
+        </div>
+        <div class="qty-row"><span id="qtyBox" class="qty-box" hidden><label for="qtyInput" class="unit">Počet kusů</label><input id="qtyInput" class="qty-input" type="text" inputmode="numeric" autocomplete="off" maxlength="9"><span class="unit">ks</span></span>
+          <button class="btn primary big" type="submit" id="qtySubmit">Zapsat export</button><button class="btn ghost" type="button" data-qcancel>Zrušit (Esc)</button></div></form>`;
+      const qf = $('#qtyForm'), qi = $('#qtyInput'), qbox = $('#qtyBox'), qsub = $('#qtySubmit');
+      const isPart = () => $('[name=expMode]:checked', qf).value === 'part';
+      const syncMode = focus => {
+        qbox.hidden = !isPart();
+        if (isPart()) { if (focus) { qi.focus(); qi.select(); } }
+        else { qi.value = ''; if (focus) qsub.focus(); }
+      };
+      qf.addEventListener('change', e => { if (e.target.name === 'expMode') syncMode(true); });
+      qsub.focus();
       lastInfo(code).then(l => {
         const box = $('#qtyInfo'), pi = partCache.get(code.toLowerCase());
         if (box) box.innerHTML = (l ? `Poslední záznam: ${recLine(l)} · ${esc(agoUnix(l.recorded_at_unix))}` : 'Průvodka zatím nemá žádný záznam.') + (pi ? `<br>${partExtra(pi)}` : '');
@@ -814,25 +828,43 @@
       });
       const cancel = () => { pending = null; qtyPanel.hidden = true; qtyPanel.innerHTML = ''; input.focus(); };
       $('[data-qcancel]', qf).onclick = cancel;
-      qi.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); cancel(); } });
+      // čtečka načetla další průvodku dřív, než se export potvrdil (fokus mimo pole pro kusy)
+      let typed = '', typedAt = 0;
+      const otherCode = () => {
+        beep('err');
+        showResult('err', 'Nejdřív potvrď export', [`Průvodka ${esc(code)} čeká na potvrzení exportu. Načtená průvodka se nezapsala.`]);
+      };
+      qf.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
+        if (e.target === qi) return;
+        const now = Date.now();
+        if (now - typedAt > 1000) typed = '';
+        if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey && e.key !== ' ') { typed += e.key; typedAt = now; e.stopPropagation(); if (e.target.type !== 'radio') e.preventDefault(); return; }
+        if ((e.key === 'Enter' || e.key === 'Tab') && typed.length > 3) { e.preventDefault(); typed = ''; otherCode(); qsub.focus(); }
+      });
       qf.addEventListener('submit', async e => {
         e.preventDefault();
-        const raw = qi.value;
-        const n = SC.qty(raw, ST.limits.qty);
-        if (n === null) {
-          // čtečka načetla další průvodku dřív, než se zadal počet kusů
-          const looksLikeCode = SC.clean(raw).length > 7 || /[^\d\s]/.test(raw);
-          qi.value = ''; qi.focus(); beep('err');
-          showResult('err', looksLikeCode ? 'Nejdřív zadej počet kusů' : 'Neplatný počet kusů',
-            [looksLikeCode ? `Pro průvodku ${esc(code)} chybí počet kusů. Načtená průvodka se nezapsala.` : `Zadej celé číslo od 1 do ${num(ST.limits.qty)}.`]);
-          return;
+        let item;
+        if (isPart()) {
+          const raw = qi.value;
+          const n = SC.qty(raw, ST.limits.qty);
+          if (n === null) {
+            const looksLikeCode = SC.clean(raw).length > 7 || /[^\d\s]/.test(raw);
+            qi.value = ''; qi.focus(); beep('err');
+            showResult('err', looksLikeCode ? 'Nejdřív zadej počet kusů' : 'Neplatný počet kusů',
+              [looksLikeCode ? `Pro průvodku ${esc(code)} chybí počet kusů. Načtená průvodka se nezapsala.` : `Zadej celé číslo od 1 do ${num(ST.limits.qty)}.`]);
+            return;
+          }
+          item = { code, qty: String(n) };
+        } else {
+          item = { code, qty: '' };
         }
-        const data = await send([{ code, qty: String(n) }]);
-        if (!data) { qi.focus(); return; }
+        const data = await send([item]);
+        if (!data) { (isPart() ? qi : qsub).focus(); return; }
         const r = data.results[0];
-        if (r.status === 'error') { showOne(r, { code, qty: String(n) }); qi.focus(); return; }
+        if (r.status === 'error') { showOne(r, item); (isPart() ? qi : qsub).focus(); return; }
         pending = null; qtyPanel.hidden = true; qtyPanel.innerHTML = '';
-        showOne(r, { code, qty: String(n) });
+        showOne(r, item);
         loadRecent();
         input.focus();
       });
@@ -867,8 +899,7 @@
       renderBatch(batch.length - 1);
       const item = batch[batch.length - 1];
       lastInfo(code).then(l => { item.info = l === undefined ? undefined : l; updateInfo(item); });
-      if (!isIn) { const q = $(`[data-q="${batch.length - 1}"]`); if (q) q.focus(); }
-      else focusScan();
+      focusScan();   // u exportu je výchozí kompletní, počet kusů se vyplní jen u části
       return { kind: 'ok', text: `Přidáno: ${code} (v seznamu ${batch.length})` };
     }
 
@@ -893,14 +924,14 @@
       const pos = position();
       batchBox.innerHTML = `<div class="card-head"><h2>${isIn ? 'Načtené průvodky k příjmu' : 'Načtené průvodky k exportu'}<span class="count">${batch.length}</span></h2>
           <div class="row">${batch.length ? '<button class="btn small" type="button" data-bclear>Vyprázdnit seznam</button>' : ''}</div></div>
-        ${batch.length ? `<div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>#</th><th>Průvodka</th>${isIn ? '' : '<th class="num">Počet ks</th>'}<th>Poslední záznam</th><th></th></tr></thead><tbody>
+        ${batch.length ? `<div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>#</th><th>Průvodka</th>${isIn ? '' : '<th class="num">Část: počet ks</th>'}<th>Poslední záznam</th><th></th></tr></thead><tbody>
           ${batch.map((x, i) => `<tr class="${x.status ? 'st-' + x.status : ''}${i === flash ? ' flash' : ''}"><td class="muted">${i + 1}</td><td class="code" data-wide data-pcode="${i}">${partCache.get(x.code.toLowerCase()) ? partTitle(x.code, partCache.get(x.code.toLowerCase())) : esc(x.code)}</td>
-            ${isIn ? '' : `<td class="num"><input class="row-qty${x.qtyBad ? ' need' : ''}" type="text" inputmode="numeric" autocomplete="off" maxlength="9" data-q="${i}" value="${esc(x.qty)}" aria-label="Počet kusů pro ${esc(x.code)}"> ks</td>`}
+            ${isIn ? '' : `<td class="num"><input class="row-qty${x.qtyBad ? ' need' : ''}" type="text" inputmode="numeric" autocomplete="off" maxlength="9" data-q="${i}" value="${esc(x.qty)}" placeholder="kompletní" aria-label="Počet kusů pro ${esc(x.code)} (prázdné = kompletní)"> ks</td>`}
             <td data-info="${i}" data-wide>${infoHtml(x)}</td><td><button class="btn ghost small" type="button" data-bdel="${i}" aria-label="Odebrat ${esc(x.code)}">Odebrat</button></td></tr>`).join('')}
           </tbody></table></div>` : `<p class="empty">Zatím nic. Načti první průvodku čtečkou.</p>`}
         <div class="batch-foot"><div class="info">
             ${isIn ? (opts.pos ? (pos ? `<span>Pozice pro všechny: <b>${esc(pos)}</b></span>` : '<span class="tag crit">Vyplň pozici</span>') : '<span class="muted">Bez pozice (zapni „Definovat pozici kam se umístí“)</span>')
-              : `<span class="fill-qty">Počet ks všem prázdným <input id="fillQty" type="text" inputmode="numeric" maxlength="9"><button class="btn small" type="button" data-fill>Doplnit</button></span>`}
+              : `<span class="muted small">Prázdný počet = kompletní export.</span> <span class="fill-qty">Počet ks všem prázdným <input id="fillQty" type="text" inputmode="numeric" maxlength="9"><button class="btn small" type="button" data-fill>Doplnit</button></span>`}
           </div>
           <div class="row-8">${dupN ? `<button class="btn" type="button" data-bforce>Zapsat přesto (${dupN})</button>` : ''}
           <button class="btn primary big" type="button" data-bsave${batch.length ? '' : ' disabled'}>Zapsat vše (${batch.length})</button></div></div>`;
@@ -911,8 +942,8 @@
       if (!list.length) return;
       if (!isIn) {
         let bad = 0;
-        list.forEach(x => { x.qtyBad = SC.qty(x.qty, ST.limits.qty) === null; if (x.qtyBad) bad++; });
-        if (bad) { renderBatch(); beep('err'); showResult('err', 'Chybí počet kusů', [`${bad} ${SC.plural(bad, 'průvodka nemá', 'průvodky nemají', 'průvodek nemá')} vyplněný počet kusů (celé číslo od 1).`]); const q = $('.row-qty.need'); if (q) q.focus(); return; }
+        list.forEach(x => { x.qtyBad = String(x.qty || '').trim() !== '' && SC.qty(x.qty, ST.limits.qty) === null; if (x.qtyBad) bad++; });
+        if (bad) { renderBatch(); beep('err'); showResult('err', 'Neplatný počet kusů', [`${bad} ${SC.plural(bad, 'průvodka má', 'průvodky mají', 'průvodek má')} neplatný počet kusů. Zadej celé číslo od 1, nebo pole nech prázdné (kompletní export).`]); const q = $('.row-qty.need'); if (q) q.focus(); return; }
       }
       const data = await send(list, force);
       if (!data) return;
@@ -1085,7 +1116,7 @@
           <td data-wide>${partTitle(r.barcode, r.info)}</td>
           <td>${actTag(r)}${r.cancelled ? `<span class="sub">stornováno ${esc(when(r.cancelled.at))} (${esc(r.cancelled.by)})${r.cancelled.reason ? ': ' + esc(r.cancelled.reason) : ''}</span>` : ''}</td>
           ${showDept ? `<td>${deptTag(r.department, r.department_label)}</td>` : ''}
-          <td class="strike">${r.position ? `pozice <b>${esc(r.position)}</b>` : ''}${r.quantity != null ? `<b>${num(r.quantity)} ks</b>` : ''}${!r.position && r.quantity == null ? '<span class="muted">—</span>' : ''}</td>
+          <td class="strike">${r.position ? `pozice <b>${esc(r.position)}</b>` : ''}${qtyText(r)}${!r.position && !qtyText(r) ? '<span class="muted">—</span>' : ''}</td>
           <td>${esc(r.user)}</td>
           <td>${r.canCancel ? `<button class="btn ghost small" type="button" data-cancel-rec="${r.id}">Stornovat</button>` : ''}</td></tr>`;
       }).join('')}</tbody></table></div>`;
@@ -1151,7 +1182,7 @@
             <div class="lc-body">
               <div class="kv big"><small>Záznam</small><b>${esc(l.action_label)}</b></div>
               <div class="kv big"><small>Oddělení</small><b>${deptTag(l.department, l.department_label)}</b></div>
-              <div class="kv"><small>${l.action === 'prijem' ? 'Pozice' : 'Počet kusů'}</small><b>${l.action === 'prijem' ? (l.position ? esc(l.position) : '<span class="muted">neuvedena</span>') : num(l.quantity) + ' ks'}</b></div>
+              <div class="kv"><small>${l.action === 'prijem' ? 'Pozice' : 'Export'}</small><b>${l.action === 'prijem' ? (l.position ? esc(l.position) : '<span class="muted">neuvedena</span>') : l.quantity != null ? 'část, ' + num(l.quantity) + ' ks' : 'kompletní'}</b></div>
               <div class="kv"><small>Kdy</small><b>${esc(fmtFull.format(new Date(l.recorded_at)))}</b></div>
               <div class="kv"><small>Kdo</small><b>${esc(l.user)}</b></div>
               ${l.canCancel ? `<div class="kv"><small>Oprava</small><button class="btn small" type="button" data-cancel-rec="${l.id}">Stornovat</button></div>` : ''}
@@ -1163,7 +1194,7 @@
         html += `<section class="card"><div class="card-head"><h2>${d.exact ? 'Další průvodky' : 'Průvodky'} odpovídající „${esc(d.q)}“<span class="count">${d.matches.length}${d.more ? '+' : ''}</span></h2><span class="hint">poslední záznam každé průvodky</span></div>
           <div class="tbl-wrap"><table class="tbl stack"><thead><tr><th>Průvodka</th><th>Poslední záznam</th><th>Oddělení</th><th>Pozice / ks</th><th>Kdy</th></tr></thead><tbody>
           ${d.matches.map(r => `<tr><td data-wide>${partTitle(r.barcode, r.info)}${r.matchedBy ? ` <span class="tag">${esc(r.matchedBy)}</span>` : ''}${r.info && r.info.link ? `<span class="sub">${partExtra(r.info, true)}</span>` : ''}</td><td>${actTag(r)}</td><td>${deptTag(r.department, r.department_label)}</td>
-            <td>${r.position ? `pozice <b>${esc(r.position)}</b>` : r.quantity != null ? `<b>${num(r.quantity)} ks</b>` : '<span class="muted">—</span>'}</td><td class="nowrap">${esc(when(r.recorded_at))}</td></tr>`).join('')}
+            <td>${r.position ? `pozice <b>${esc(r.position)}</b>` : qtyText(r) || '<span class="muted">—</span>'}</td><td class="nowrap">${esc(when(r.recorded_at))}</td></tr>`).join('')}
           </tbody></table></div>${d.more ? '<p class="hint mt-10">Zobrazeno prvních 50. Zpřesni hledání.</p>' : ''}</section>`;
       }
       if (!d.exact && !d.matches.length) html = `<section class="card"><p class="empty">Průvodka „${esc(d.q)}“ v evidenci není.</p></section>`;
@@ -1452,7 +1483,7 @@
       barcode: 'PR-2026-004512', found: true,
       record: {
         id: 1842, barcode: 'PR-2026-004512', action: 'export', action_label: 'Export z pracoviště', department: 'brush_wpa', department_label: 'Brush WPA',
-        position: null, quantity: 48, user: 'Jan Novák', user_login: 'novak', recorded_at: '2026-10-21T14:05:09+02:00', recorded_at_utc: '2026-10-21T12:05:09Z', recorded_at_unix: 1792591509,
+        position: null, quantity: 48, complete: false, user: 'Jan Novák', user_login: 'novak', recorded_at: '2026-10-21T14:05:09+02:00', recorded_at_utc: '2026-10-21T12:05:09Z', recorded_at_unix: 1792591509,
       },
     };
     const pre = (text) => `<div class="pre"><pre>${esc(text)}</pre><button class="btn small copy" type="button" data-copy>Kopírovat</button></div>`;
@@ -1522,7 +1553,7 @@
       <ul>
         <li><code>action</code>: <code>prijem</code> (Příjem na pracoviště) nebo <code>export</code> (Export z pracoviště).</li>
         <li><code>department</code>: ${ST.depts.map(d => `<code>${esc(d.code)}</code> (${esc(d.name)})`).join(', ')}.</li>
-        <li><code>position</code>: pozice, kam se díly umístily (jen u příjmu, jinak <code>null</code>). <code>quantity</code>: počet kusů (jen u exportu).</li>
+        <li><code>position</code>: pozice, kam se díly umístily (jen u příjmu, jinak <code>null</code>). <code>quantity</code>: počet kusů (jen u exportu části). <code>complete</code>: <code>true</code> u kompletního exportu (počet kusů je pak <code>null</code>).</li>
         <li><code>recorded_at</code> je v pražském čase s posunem (ISO 8601), <code>recorded_at_utc</code> v UTC, <code>recorded_at_unix</code> v sekundách.</li>
         <li>Velikost písmen v barcodu nehraje roli (<code>pr-1</code> = <code>PR-1</code>).</li>
       </ul>

@@ -47,6 +47,7 @@ Bez přepisu cest na serveru jde i `api/v1/index.php?endpoint=last&barcode=…`.
     "department_label": "Brush WPA",
     "position": null,
     "quantity": 48,
+    "complete": false,
     "user": "Jan Novák",
     "user_login": "novak",
     "recorded_at": "2026-10-21T14:05:09+02:00",
@@ -60,7 +61,8 @@ Bez přepisu cest na serveru jde i `api/v1/index.php?endpoint=last&barcode=…`.
 - `department`: `brouseni_wpa` (Broušení WPA), `brush_wpa` (Brush WPA), `hala` (Hala 2; do verze 1.2 se jmenovala Hala, kód zůstal),
   `montaz` (Montáž), `elox` (Elox), `studio` (Studio), `cnc_hala2` (CNC Hala2).
 - `position`: pozice, kam se díly umístily (jen u příjmu, jinak `null`).
-- `quantity`: počet kusů (jen u exportu, jinak `null`).
+- `quantity`: počet kusů (jen u exportu části, jinak `null`).
+- `complete`: `true` u kompletního exportu (od verze 1.7: odešlo všechno, `quantity` je `null`).
 - `recorded_at` je v pražském čase s posunem (ISO 8601), `recorded_at_utc` v UTC,
   `recorded_at_unix` v sekundách.
 - Velikost písmen v barcodu nehraje roli. Stornované záznamy se do posledního stavu ani do

@@ -82,6 +82,8 @@ function etd_record_text(array $r): string
     }
     if ($r['qty'] !== null) {
         $parts[] = number_format((int)$r['qty'], 0, ',', ' ') . ' ks';
+    } elseif ($r['action'] === 'export') {
+        $parts[] = 'kompletní';
     }
     $parts[] = etd_human_time((int)$r['created_at']);
     $parts[] = $r['user_name'];

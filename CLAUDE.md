@@ -13,7 +13,21 @@ Po každé větší práci **aktualizuj sekci „Kde jsme skončili“**.
 
 ## Kde jsme skončili
 
-Stav k 31. 10. 2026, verze **1.6** (schéma databáze 5):
+Stav k 5. 11. 2026, verze **1.7** (schéma databáze 5):
+
+- 1.7: „nasaď vzhled z …“ (návrh dashboardu v ZIPu na Google Disku: tmavé sklo, oranžová, písmo
+  Plus Jakarta Sans). Jen jeden tmavý vzhled (světlý a `prefers-color-scheme` pryč), tokeny na
+  `:root`, písmo vlastní v `static/fonts/` (woff2, OFL v `.txt`), sekce „Vzhled 2.0: sklo“ na konci
+  `app.css` (blur jen hlavička, záložky, přihlášení, dialogy; `prefers-reduced-transparency`).
+  Fotka interiéru z návrhu nepoužita (licence neznámá, repo veřejné). Urgent zůstal sytě červený,
+  akce příjem tyrkysová / export fialová, barvy oddělení beze změny. Apache: hlavičky i pro woff2.
+  - Pak: „u exportu vždy výchozí Kompletní, jde přepnout na Část, ještě něco zůstane; u části se
+    otevře pole pro číslo a jde hned psát“. Bez změny schématu: kompletní export = `qty NULL`
+    (dřív export vždy s počtem), API stránky `items[].complete: true`; záznam vrací `complete`.
+    Fokus na Zapsat export (Enter potvrdí); čtečka během čekání = „Nejdřív potvrď export“ (zachytí
+    `keydown` na formuláři, `stopPropagation` kvůli globálnímu přesměrování do pole). Vícenásobný
+    export: prázdný počet = kompletní, fokus zůstává v barcodu. Část zatím odebere průvodku
+    z Na pracovištích a zhasne urgent stejně jako dřív (případně navrhnout změnu).
 
 - 1.6: „pokud systém dokáže přiřadit číslo objednávky, EAN, index, ať ve vizualizaci upřednostní tyto
   data a barcode minimalizuje; v přehledu ať jsou vidět a jde podle nich vyhledávat“.
@@ -197,13 +211,14 @@ cd /root/evidence_toku_dilu && git pull origin claude/elegant-clarke-vl5n7d && s
   nespouští ji). Blok `// <nastaveni>` … `// </nastaveni>` nahrazuje generátor, neměň značky.
 - `static/app.js`: celé rozhraní (obrazovky, záložky, dialogy). `static/scan.js`: čisté funkce
   pro čtečku (`ETDScan`: čištění, oprava české klávesnice, počet kusů). `static/app.css`: vzhled,
-  barvy jako tokeny na `:root` (tmavý režim přes `prefers-color-scheme`).
+  barvy jako tokeny na `:root` (od 1.7 jen tmavý skleněný vzhled).
 - `bin/`: `setup-token.php` (kód prvního spuštění), `backup-db.php`, `reset-password.php`,
   `rebuild-parts.php`, `hook-worker.php` (odesílání do tabulek, cron). Jen z příkazové řádky.
 - `deploy/`: `install.sh`, konfigurace Apache a `cron-evidence_toku_dilu` (→ `/etc/cron.d/`). `router.php`: router pro `php -S`.
 - `tests/`: `test_http.py` (server, API, nástroje, aktualizace databáze verze 1.0), `test_scan.js`,
   `e2e.js` (Playwright), `e2e_camera.js` (QR fotoaparátem s falešnou kamerou), `e2e_sheets.js`
   (Google tabulka: `gas_mock.js` + `fake_google.js`).
+- `static/fonts/`: Plus Jakarta Sans (woff2, latin + latin-ext) a `LICENSE-plus-jakarta-sans.txt` (OFL).
 - `static/vendor/`: `zxing.min.js` a `LICENSE-zxing.txt` (licence se z webu nevydává, `.txt`).
 
 ## Datový model (SQLite, `lib/etd.php`)
@@ -253,5 +268,4 @@ php -l lib/etd.php                        # a další změněné PHP soubory
   `http://127.0.0.1/evidence_toku_dilu/` (z localhostu aplikace pustí i bez HTTPS).
 - Pozor na `pkill -f "php -S …"`: vzor najde i vlastní shell a zabije ho.
 - CSP nepovoluje `style="…"` v HTML: pro rozestupy jsou pomocné třídy na konci `app.css`.
-- Barvy oddělení jsou kategorická paleta v pevném pořadí, ověřená validátorem dataviz (světlý
-  i tmavý režim). Barva je vždy u názvu oddělení, nikdy sama.
+- Barvy oddělení jsou kategorická paleta v pevném pořadí, ověřená validátorem dataviz. Barva je vždy u názvu oddělení, nikdy sama.

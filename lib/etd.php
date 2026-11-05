@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Časy jsou v databázi jako unixové sekundy (UTC), ven jdou v pražském čase (ISO 8601).
  */
 
-const ETD_VERSION = '1.6';
+const ETD_VERSION = '1.7';
 /** Verze schématu databáze (PRAGMA user_version). Novou verzi doplň do etd_migrate(). */
 const ETD_SCHEMA = 5;
 /** Zapisovat smí jen stránka aspoň téhle verze (hlavička X-Etd-Client), viz etd_require_client(). */
@@ -808,6 +808,7 @@ function etd_record_public(array $r): array
         'department_label' => etd_dept_name($r['dept']),
         'position' => $r['position'] === null || $r['position'] === '' ? null : $r['position'],
         'quantity' => $r['qty'] === null ? null : (int)$r['qty'],
+        'complete' => $r['action'] === 'export' && $r['qty'] === null,
         'user' => $r['user_name'],
         'user_login' => $r['user_login'],
         'recorded_at' => etd_iso($ts),
@@ -887,8 +888,11 @@ function etd_scan(array $session, string $action, array $items, string $position
             $seen[$key] = true;
             $qty = null;
             if ($action === 'export') {
-                $qty = etd_qty($item['qty'] ?? null);
-                if ($qty === null) {
+                // kompletní export (od 1.7): bez počtu kusů, odešlo všechno; část: počet kusů povinný
+                $rawQty = $item['qty'] ?? null;
+                $complete = !empty($item['complete']) && ($rawQty === null || $rawQty === '');
+                $qty = $complete ? null : etd_qty($rawQty);
+                if ($qty === null && !$complete) {
                     $results[] = ['barcode' => $code, 'status' => 'error', 'message' => 'Zadej počet kusů (celé číslo od 1 do ' . number_format(ETD_MAX_QTY, 0, ',', ' ') . ').'];
                     continue;
                 }

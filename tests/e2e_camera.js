@@ -126,12 +126,14 @@ function qrVideo(file) {
     await page.uncheck('#optPos');
     await page.uncheck('#optMulti', { force: true });
 
-    // export: po načtení fotoaparátem se ptá na počet kusů
+    // export: po načtení fotoaparátem výchozí Kompletní, Část otevře počet kusů
     await page.click('[data-tab=export]');
     await page.waitForSelector('.scan.a-export [data-cam]');
     await page.click('[data-cam]');
-    await page.waitForSelector('#qtyInput', { timeout: 15000 });
-    check(await page.evaluate(() => document.activeElement.id) === 'qtyInput', 'export: po QR je fokus v počtu kusů');
+    await page.waitForSelector('#qtySubmit', { timeout: 15000 });
+    check(await page.isChecked('[name=expMode][value=all]'), 'export: po QR je výchozí Kompletní');
+    await page.tap('.exp-mode label:has([value=part])');
+    check(await page.evaluate(() => document.activeElement.id) === 'qtyInput', 'export: Část otevře pole pro kusy s fokusem');
     await page.keyboard.type('25'); await page.keyboard.press('Enter');
     await page.waitForFunction(() => /25 ks/.test(document.querySelector('#scanResult').innerText));
     check(true, 'export z fotoaparátu zapsal 25 ks');

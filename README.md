@@ -47,14 +47,17 @@ přestane platit a uživatel si zvolí nové stejně jako při prvním přihlá�
 přišly (předchozí záznam). Zaškrtnutím **Definovat pozici kam se umístí** se k příjmu zapíše
 pozice (např. „Regál A3“). Aplikace nabízí pozice použité na pracovišti v posledních 90 dnech.
 
-**Export z pracoviště.** Po načtení barcodu zadej **počet kusů** a potvrď Enterem. Bez počtu
-kusů se export nezapíše. Když čtečka místo počtu kusů načte další průvodku, aplikace na to
-upozorní a export čeká dál.
+**Export z pracoviště.** Po načtení barcodu je předvybrané **Kompletní** (odchází všechno), stačí
+potvrdit Enterem. Když z pracoviště odchází jen část, klikni na **Část, ještě něco zůstane**:
+otevře se pole pro počet kusů a dá se do něj hned psát. Když čtečka načte další průvodku dřív,
+než se export potvrdí, aplikace na to upozorní, nic nezapíše a export čeká dál. Kompletní export
+se v záznamech ukazuje jako „kompletní“, část jako počet kusů. Průvodka i po části odejde
+z pohledu Na pracovištích (poslední záznam je export).
 
 **Vícenásobný příjem / export.** Přepínač nahoře. Průvodky se jen načítají do seznamu (stejná
 průvodka podruhé se nepřidá) a nakonec se zapíšou tlačítkem **Zapsat vše**. U příjmu platí
-pozice pro všechny průvodky v seznamu. U exportu má každá průvodka svůj počet kusů; „Počet ks
-všem prázdným“ vyplní stejné číslo všem, které ho ještě nemají. Rozpracovaný seznam přežije
+pozice pro všechny průvodky v seznamu. U exportu je prázdný počet kusů kompletní export; u části
+se počet vyplní. „Počet ks všem prázdným“ vyplní stejné číslo všem, které ho ještě nemají. Rozpracovaný seznam přežije
 obnovení stránky.
 
 **Dvojí načtení.** Stejný záznam (stejná průvodka, stejné pracoviště, stejný typ) do 10 minut se
@@ -89,7 +92,7 @@ na zadávání přes Alt-kódy.
 Na zařízení s dotykovou obrazovkou je vedle pole pro barcode tlačítko **Načíst QR** (v Příjmu,
 Exportu i Přehledu). Otevře zadní fotoaparát přes celou obrazovku; stačí namířit na QR kód
 průvodky. Jednotlivě se fotoaparát po načtení zavře a pokračuje se jako po čtečce (příjem se
-zapíše, u exportu se zadá počet kusů). Ve vícenásobném režimu zůstane otevřený, každý nový kód
+zapíše, u exportu se vybere Kompletní, nebo Část s počtem kusů). Ve vícenásobném režimu zůstane otevřený, každý nový kód
 přidá do seznamu (stejný jen jednou) a zavře se tlačítkem **Hotovo**. Kde to telefon umí, jde
 zapnout **Světlo**.
 

@@ -134,20 +134,24 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     check((await api(page, 'search', { q: 'PR-2010' })).exact === null, 'bez vyplněné pozice se příjem nezapsal');
     await page.uncheck('#optPos');
 
-    /* --- export: jedna průvodka s počtem kusů --- */
+    /* --- export: jedna průvodka; výchozí Kompletní, Část otevře počet kusů (1.7) --- */
     await page.click('[data-tab=export]');
     await page.waitForSelector('.scan.a-export');
     await scan(page, 'PR-2001');
-    await page.waitForSelector('#qtyInput');
-    check(await page.evaluate(() => document.activeElement.id) === 'qtyInput', 'export: po načtení je fokus v počtu kusů');
+    await page.waitForSelector('#qtySubmit');
+    check(await page.isChecked('[name=expMode][value=all]') && await page.isHidden('#qtyInput'), 'export: výchozí Kompletní, pole pro kusy skryté');
+    check(await page.evaluate(() => document.activeElement.id) === 'qtySubmit', 'export: fokus na Zapsat export');
     await page.waitForFunction(() => /Poslední záznam: Příjem/.test(document.querySelector('#qtyInfo').innerText));
+    await page.click('[name=expMode][value=part]');
+    check(await page.isVisible('#qtyInput') && await page.evaluate(() => document.activeElement.id) === 'qtyInput', 'Část: pole pro kusy se otevře s fokusem');
     await shot(page, '04-export-ks');
     await page.keyboard.type('48'); await page.keyboard.press('Enter');
     await waitResult(page, /Export z pracoviště Hala 2/);
     check((await resultText(page)).includes('48 ks'), 'export zapsal 48 ks');
 
     await scan(page, 'PR-2002');
-    await page.waitForSelector('#qtyInput');
+    await page.waitForSelector('#qtySubmit');
+    await page.click('[name=expMode][value=part]');
     await page.keyboard.type('PR-2003'); await page.keyboard.press('Enter');
     await waitResult(page, /Nejdřív zadej počet kusů/);
     check(!(await page.locator('#qtyPanel').isHidden()), 'barcode místo počtu kusů: export čeká dál');
@@ -155,19 +159,29 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     await waitResult(page, /1\s200 ks/);
     check(true, 'počet kusů s mezerou (1 200)');
 
-    /* --- vícenásobný export --- */
+    await scan(page, 'PR-2004');
+    await page.waitForSelector('#qtySubmit');
+    await page.keyboard.type('PR-2005'); await page.keyboard.press('Enter');
+    await waitResult(page, /Nejdřív potvrď export/);
+    check(!(await page.locator('#qtyPanel').isHidden()), 'další barcode u kompletního exportu: nezapíše se, export čeká dál');
+    await page.keyboard.press('Enter');
+    await waitResult(page, /Export z pracoviště Hala 2/);
+    check((await resultText(page)).includes('kompletní'), 'kompletní export bez počtu kusů');
+
+    /* --- vícenásobný export: prázdný počet = kompletní --- */
     await page.check('#optMulti', { force: true });
     await scan(page, 'PR-2003');
-    check(await page.evaluate(() => document.activeElement.matches('.row-qty')), 'vícenásobný export: fokus na počtu kusů nové průvodky');
-    await page.keyboard.type('5'); await page.keyboard.press('Enter');
-    check(await page.evaluate(() => document.activeElement.id) === 'scanInput', 'Enter v počtu kusů vrátí fokus na barcode');
+    check(await page.evaluate(() => document.activeElement.id) === 'scanInput', 'vícenásobný export: fokus zůstane na barcodu');
+    await page.fill('[data-q="0"]', '5');
     await scan(page, 'PR-1001');
-    await page.focus('#scanInput');
+    await page.fill('[data-q="1"]', '0');
     await page.click('[data-bsave]');
-    await waitResult(page, /Chybí počet kusů/);
+    await waitResult(page, /Neplatný počet kusů/);
+    await page.fill('[data-q="1"]', '');
     await page.fill('#fillQty', '7');
     await page.click('[data-fill]');
     check(await page.locator('[data-q="1"]').inputValue() === '7', 'Doplnit vyplní prázdný počet kusů');
+    await page.fill('[data-q="1"]', '');
     await shot(page, '05-vicenasobny-export');
     await page.click('[data-bsave]');
     await waitResult(page, /Exportováno 2 průvodky/);
@@ -302,10 +316,11 @@ async function shot(page, name) { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: 
     await page.click('[data-tab=export]');
     await page.waitForSelector('#scanInput');
     check(await page.isVisible('#urgentBar'), 'pás svítí i na jiných záložkách');
+    await page.waitForTimeout(500);   // záložka se po přepnutí vykreslí ještě jednou s uloženými volbami
     if (await page.isChecked('#optMulti')) await page.uncheck('#optMulti', { force: true });
     await scan(page, '12345.678902.23411');
-    await page.waitForSelector('#qtyInput');
-    await page.fill('#qtyInput', '3'); await page.press('#qtyInput', 'Enter');
+    await page.waitForSelector('#qtySubmit');
+    await page.keyboard.press('Enter');
     await waitResult(page, /Urgent odešel/);
     await page.waitForSelector('#urgentBar', { state: 'hidden' });
     check(true, 'po exportu z pracoviště urgent zhasne');
